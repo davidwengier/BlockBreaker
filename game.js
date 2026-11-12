@@ -24,12 +24,12 @@ const POWERUPS_PER_LEVEL = 3;
 const MYSTERY_COLOR = '#bdc3c7';
 const POWERUPS = {
   fire:    { color: '#ff5722', duration: 8,  label: 'Fireball: smashes through blocks' },
-  ice:     { color: '#4dd0e1', duration: 10, label: 'Ice: slower ball' },
   giant:   { color: '#66bb6a', duration: 10, label: 'Giant ball' },
   wide:    { color: '#ab47bc', duration: 12, label: 'Wide paddle' },
   bomb:    { color: '#ec407a', duration: 8,  label: 'Bomb: blocks explode' },
   heart:   { color: '#ffd700', duration: 3,  label: 'Extra life!' },
   // Negative powerups
+  ice:     { color: '#4dd0e1', duration: 10, label: 'Ice: slower ball', bad: true },
   shrink:  { color: '#8d6e63', duration: 10, label: 'Shrunk paddle', bad: true },
   fast:    { color: '#d50000', duration: 8,  label: 'Fast ball', bad: true },
   reverse: { color: '#aeea00', duration: 8,  label: 'Reversed controls', bad: true },
