@@ -40,17 +40,17 @@ const paddle = { x: (W - PADDLE_W) / 2, y: H - 30 };
 
 // Fill the side legend from the powerup table so the two never drift apart
 const legend = document.getElementById('legend');
-function addLegendItem(color, text, bad) {
+function addLegendItem(color, text, { bad = false, square = false } = {}) {
   const li = document.createElement('li');
   const dot = document.createElement('span');
-  dot.className = 'dot';
+  dot.className = square ? 'dot square' : 'dot';
   dot.style.background = color;
   if (bad) li.className = 'bad';
   li.append(dot, text);
   legend.append(li);
 }
-addLegendItem(MYSTERY_COLOR, 'Silver block: hides a powerup');
-for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, p.bad);
+addLegendItem(MYSTERY_COLOR, 'Silver block: hides a powerup', { square: true });
+for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, { bad: p.bad });
 const ball = { x: 0, y: 0, vx: 0, vy: 0, launched: false };
 let blocks, score, lives, level, state; // state: 'playing' | 'lost'
 let blockW = 0; // width of blocks in the current level
