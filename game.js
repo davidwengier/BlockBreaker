@@ -18,29 +18,39 @@ const PADDLE_SPEED = 480; // px/sec
 const BALL_R = 7;
 const BALL_SPEED = 320; // px/sec
 
-// Hidden in random blocks; hitting one turns the ball this colour and applies the effect.
-// Only one is active at a time, and it ends on timeout, a lost life or a new level.
+// Hidden in random blocks (drawn in MYSTERY_COLOR); hitting one turns the ball this colour and
+// applies the effect. Only one is active at a time, and it ends on timeout, a lost life or a new level.
 const POWERUPS_PER_LEVEL = 3;
+const MYSTERY_COLOR = '#bdc3c7';
 const POWERUPS = {
-  fire:   { color: '#ff5722', duration: 8,  label: 'Fireball: smashes through blocks' },
-  ice:    { color: '#4dd0e1', duration: 10, label: 'Ice: slower ball' },
-  giant:  { color: '#66bb6a', duration: 10, label: 'Giant ball' },
-  wide:   { color: '#ab47bc', duration: 12, label: 'Wide paddle' },
-  bomb:   { color: '#ec407a', duration: 8,  label: 'Bomb: blocks explode' },
-  heart:  { color: '#ffd700', duration: 3,  label: 'Extra life!' },
+  fire:    { color: '#ff5722', duration: 8,  label: 'Fireball: smashes through blocks' },
+  ice:     { color: '#4dd0e1', duration: 10, label: 'Ice: slower ball' },
+  giant:   { color: '#66bb6a', duration: 10, label: 'Giant ball' },
+  wide:    { color: '#ab47bc', duration: 12, label: 'Wide paddle' },
+  bomb:    { color: '#ec407a', duration: 8,  label: 'Bomb: blocks explode' },
+  heart:   { color: '#ffd700', duration: 3,  label: 'Extra life!' },
+  // Negative powerups
+  shrink:  { color: '#8d6e63', duration: 10, label: 'Shrunk paddle', bad: true },
+  fast:    { color: '#d50000', duration: 8,  label: 'Fast ball', bad: true },
+  reverse: { color: '#aeea00', duration: 8,  label: 'Reversed controls', bad: true },
+  ghost:   { color: '#78909c', duration: 8,  label: 'Ghost: ball is nearly invisible', bad: true },
 };
 
 const paddle = { x: (W - PADDLE_W) / 2, y: H - 30 };
 
 // Fill the side legend from the powerup table so the two never drift apart
-for (const p of Object.values(POWERUPS)) {
+const legend = document.getElementById('legend');
+function addLegendItem(color, text, bad) {
   const li = document.createElement('li');
   const dot = document.createElement('span');
   dot.className = 'dot';
-  dot.style.background = p.color;
-  li.append(dot, p.label);
-  document.getElementById('legend').append(li);
+  dot.style.background = color;
+  if (bad) li.className = 'bad';
+  li.append(dot, text);
+  legend.append(li);
 }
+addLegendItem(MYSTERY_COLOR, 'Silver block: hides a powerup');
+for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, p.bad);
 const ball = { x: 0, y: 0, vx: 0, vy: 0, launched: false };
 let blocks, score, lives, level, state; // state: 'playing' | 'lost'
 let blockW = 0; // width of blocks in the current level
@@ -48,11 +58,18 @@ let active = null; // { type, timeLeft } for the current powerup
 const keys = {};
 
 const ballRadius = () => (active?.type === 'giant' ? BALL_R * 2 : BALL_R);
-const paddleWidth = () => (active?.type === 'wide' ? PADDLE_W * 1.6 : PADDLE_W);
+const paddleWidth = () => {
+  if (active?.type === 'wide') return PADDLE_W * 1.6;
+  if (active?.type === 'shrink') return PADDLE_W * 0.6;
+  return PADDLE_W;
+};
+const reversed = () => active?.type === 'reverse';
 
 function ballSpeed() {
   const base = BALL_SPEED * (1 + SPEED_STEP * (level - 1));
-  return active?.type === 'ice' ? base * 0.6 : base;
+  if (active?.type === 'ice') return base * 0.6;
+  if (active?.type === 'fast') return base * 1.5;
+  return base;
 }
 
 // Keep the ball's direction but apply the current speed (after powerups start/end)
@@ -146,7 +163,8 @@ function movePaddleTo(x) {
 
 function pointerX(clientX) {
   const rect = canvas.getBoundingClientRect();
-  return (clientX - rect.left) * (W / rect.width);
+  const x = (clientX - rect.left) * (W / rect.width);
+  return reversed() ? W - x : x;
 }
 
 window.addEventListener('keydown', e => {
@@ -163,7 +181,7 @@ const locked = () => document.pointerLockElement === canvas;
 canvas.addEventListener('pointermove', e => {
   if (locked()) {
     const rect = canvas.getBoundingClientRect();
-    movePaddleTo(paddle.x + paddleWidth() / 2 + e.movementX * (W / rect.width));
+    movePaddleTo(paddle.x + paddleWidth() / 2 + e.movementX * (W / rect.width) * (reversed() ? -1 : 1));
   } else if (e.pointerType !== 'mouse') {
     movePaddleTo(pointerX(e.clientX));
   }
@@ -180,7 +198,7 @@ canvas.addEventListener('pointerdown', e => {
 function update(dt) {
   if (state !== 'playing') return;
 
-  const dir = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+  const dir = ((keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0)) * (reversed() ? -1 : 1);
   paddle.x = Math.max(0, Math.min(W - paddleWidth(), paddle.x + dir * PADDLE_SPEED * dt));
 
   if (!ball.launched) {
@@ -258,27 +276,19 @@ function draw() {
 
   for (const b of blocks) {
     if (!b.alive) continue;
-    ctx.fillStyle = b.color;
+    ctx.fillStyle = b.powerup ? MYSTERY_COLOR : b.color;
     ctx.fillRect(b.x, b.y, blockW, BLOCK_H);
-    if (b.powerup) {
-      // Small marker so players can see which blocks hold a powerup
-      ctx.fillStyle = POWERUPS[b.powerup].color;
-      ctx.beginPath();
-      ctx.arc(b.x + blockW / 2, b.y + BLOCK_H / 2, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
   }
 
   ctx.fillStyle = active?.type === 'wide' ? POWERUPS.wide.color : '#ecf0f1';
   ctx.fillRect(paddle.x, paddle.y, paddleWidth(), PADDLE_H);
 
   ctx.fillStyle = active ? POWERUPS[active.type].color : '#ecf0f1';
+  ctx.globalAlpha = active?.type === 'ghost' ? 0.15 : 1;
   ctx.beginPath();
   ctx.arc(ball.x, ball.y, ballRadius(), 0, Math.PI * 2);
   ctx.fill();
+  ctx.globalAlpha = 1;
 
   ctx.fillStyle = '#ecf0f1';
   ctx.font = '16px sans-serif';
