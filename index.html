@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Block Breaker</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css">
+  <script>
+    // GitHub Pages lets browsers cache files for 10 minutes; a unique query string always loads the latest deploy.
+    const cacheBuster = Date.now();
+    document.write(`<link rel="stylesheet" href="style.css?v=${cacheBuster}">`);
+  </script>
 </head>
 <body>
   <div class="layout">
@@ -13,6 +17,6 @@
     <ul id="legend"></ul>
   </div>
   <p class="help">Move: ← → / A D / mouse / touch &nbsp;·&nbsp; Launch: Space or click (click captures the mouse, Esc releases it)<br>Pass through coloured rings to collect powerups.</p>
-  <script src="game.js"></script>
+  <script>document.write(`<script src="game.js?v=${cacheBuster}"><\/script>`);</script>
 </body>
 </html>
