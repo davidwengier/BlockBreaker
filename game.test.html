@@ -297,8 +297,36 @@
       damageBlock(b, 2);
       launched = true;
       update(0);
+      assert(state === 'cleared' && level === 1, 'Clearing the level did not show the celebration');
+      update(CONTINUE_DELAY);
+      launch();
       assert(level === 2 && !launched && blocks.every(block => block.hits > 0), 'Cleared level did not advance');
       assert(pickups.length === POWERUPS_PER_LEVEL && !pickups.includes(pickup), 'Cleared level kept the old pickups');
+    });
+
+    test('Clearing a level celebrates with this level\'s score and waits for input', () => {
+      const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 1);
+      blocks = [b];
+      score = levelStartScore = 40; // as if earlier levels earned 40
+      damageBlock(b);
+      launched = true;
+      update(0);
+      assert(state === 'cleared' && celebration.levelScore === 10 && score === 50, 'Wrong level score');
+      launch();
+      assert(state === 'cleared', 'Input straight after clearing skipped the celebration');
+      for (let i = 0; i < 40; i++) update(0.05);
+      assert(celebration.sparks.length > 0, 'No fireworks burst');
+      draw();
+      for (let i = 0; i < 1200; i++) update(0.05);
+      assert(state === 'cleared' && level === 1, 'Celebration advanced without input');
+      launch();
+      assert(state === 'playing' && level === 2 && celebration === null && score === 50, 'Did not start the next level');
+      const next = blocks[0];
+      damageBlock(next, next.hits);
+      for (const block of blocks) block.hits = 0;
+      launched = true;
+      update(0);
+      assert(celebration.levelScore === score - 50, 'Level score included earlier levels');
     });
 
     test('Powerups last until the next pickup, through lost lives and new levels', () => {
@@ -314,6 +342,8 @@
       blocks[0].hits = 0;
       launched = true;
       update(0);
+      update(CONTINUE_DELAY);
+      launch();
       assert(level === 2 && active?.type === 'wide', 'Powerup ended on a new level');
       pickups = [{ x: balls[0].x, y: balls[0].y, type: 'ice' }];
       collectPowerups(balls[0]);
