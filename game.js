@@ -3,14 +3,25 @@ const ctx = canvas.getContext('2d');
 const W = canvas.width;
 const H = canvas.height;
 
-const ROWS = 5;
-const COLS = 10;
-const BLOCK_GAP = 4;
+const ROWS = 6;
+const COLS = 15;
+const BLOCK_GAP = 8;
 const BLOCK_TOP = 50;
-const BLOCK_H = 20;
-const SHRINK_AFTER_LEVEL = 5; // later levels use blocks half as wide
+const BLOCK_AREA_H = 250;
+const THROUGH_PATHS = 2;
+const HITS_PER_LEVEL = 6;
+const SHRINK_AFTER_LEVEL = 5; // later levels use more, smaller shapes
 const SPEED_STEP = 0.1; // ball speed increase per level
-const ROW_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db'];
+const HITS_PER_COLOR = 5; // each colour covers this many hits, cycling after the last
+const BLOCK_COLORS = ['#9ccc65', '#ffee58', '#ffb74d', '#ef5350', '#ba68c8', '#64b5f6'];
+// Clockwise outlines in cell units; the label stays inside a solid part after rotation.
+const BLOCK_SHAPES = [
+  { points: [[0, 0], [1, 0], [1, 2], [2, 2], [2, 3], [0, 3]], label: [0.5, 1.5] }, // L
+  { points: [[0, 0], [3, 0], [3, 1], [2, 1], [2, 2], [1, 2], [1, 1], [0, 1]], label: [1.5, 0.5] }, // T
+  { points: [[0, 0], [2, 0], [2, 1], [3, 1], [3, 2], [1, 2], [1, 1], [0, 1]], label: [1.5, 1] }, // zigzag
+  { points: [[0, 0], [3, 0], [3, 1], [0, 1]], label: [1.5, 0.5] }, // bar
+  { points: [[0, 0], [2, 0], [2, 2], [0, 2]], label: [1, 1] }, // square
+];
 
 const PADDLE_W = 90;
 const PADDLE_H = 12;
@@ -18,15 +29,15 @@ const PADDLE_SPEED = 480; // px/sec
 const BALL_R = 7;
 const BALL_SPEED = 320; // px/sec
 
-// Hidden in random blocks (drawn in MYSTERY_COLOR); hitting one turns the ball this colour and
-// applies the effect. Only one is active at a time, and it ends on timeout, a lost life or a new level.
+// Floating pickups change the ball's colour and apply an effect without a bounce.
+// Only one is active at a time, ending on timeout, a lost life or a new level.
 const POWERUPS_PER_LEVEL = 3;
-const MYSTERY_COLOR = '#bdc3c7';
+const POWERUP_R = 9;
 const POWERUPS = {
-  fire:    { color: '#ff5722', duration: 8,  label: 'Fireball: smashes through blocks' },
+  multi:   { color: '#ff5722', duration: 3,  label: 'Multi-ball: a new ball splits off' },
   giant:   { color: '#66bb6a', duration: 10, label: 'Giant ball' },
   wide:    { color: '#ab47bc', duration: 12, label: 'Wide paddle' },
-  bomb:    { color: '#ec407a', duration: 8,  label: 'Bomb: blocks explode' },
+  double:  { color: '#ec407a', duration: 8,  label: 'Double strength: hits count twice' },
   heart:   { color: '#ffd700', duration: 3,  label: 'Extra life!' },
   // Negative powerups
   ice:     { color: '#4dd0e1', duration: 10, label: 'Ice: slower ball', bad: true },
@@ -44,16 +55,21 @@ function addLegendItem(color, text, { bad = false, square = false } = {}) {
   const li = document.createElement('li');
   const dot = document.createElement('span');
   dot.className = square ? 'dot square' : 'dot';
-  dot.style.background = color;
+  dot.style.background = square ? color : 'transparent';
+  dot.style.borderColor = color;
   if (bad) li.className = 'bad';
   li.append(dot, text);
   legend.append(li);
 }
-addLegendItem(MYSTERY_COLOR, 'Silver block: hides a powerup', { square: true });
+for (let i = 0; i < BLOCK_COLORS.length; i++) {
+  const max = (i + 1) * HITS_PER_COLOR;
+  addLegendItem(blockColor(max), `${max - HITS_PER_COLOR + 1}-${max} hits`, { square: true });
+}
 for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, { bad: p.bad });
-const ball = { x: 0, y: 0, vx: 0, vy: 0, launched: false };
-let blocks, score, lives, level, state; // state: 'playing' | 'lost'
-let blockW = 0; // width of blocks in the current level
+// Every ball in play; a life is only lost once all of them have fallen off the bottom.
+let balls = [];
+let launched = false;
+let blocks, pickups, score, lives, level, state; // state: 'playing' | 'lost'
 let active = null; // { type, timeLeft } for the current powerup
 const keys = {};
 
@@ -72,13 +88,15 @@ function ballSpeed() {
   return base;
 }
 
-// Keep the ball's direction but apply the current speed (after powerups start/end)
+// Keep each ball's direction but apply the current speed (after powerups start/end)
 function applySpeed() {
-  const current = Math.hypot(ball.vx, ball.vy);
-  if (current === 0) return;
-  const k = ballSpeed() / current;
-  ball.vx *= k;
-  ball.vy *= k;
+  for (const ball of balls) {
+    const current = Math.hypot(ball.vx, ball.vy);
+    if (current === 0) continue;
+    const k = ballSpeed() / current;
+    ball.vx *= k;
+    ball.vy *= k;
+  }
 }
 
 function setPowerup(type) {
@@ -89,37 +107,168 @@ function setPowerup(type) {
   applySpeed();
 }
 
-function buildBlocks() {
-  // Past the shrink level, blocks are half as wide, so twice as many fit per row
-  const shrunk = level > SHRINK_AFTER_LEVEL;
-  const cols = shrunk ? COLS * 2 : COLS;
-  blockW = (W - BLOCK_GAP * (COLS + 1)) / COLS / (shrunk ? 2 : 1);
-  const gap = (W - cols * blockW) / (cols + 1);
-  blocks = [];
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < cols; c++) {
-      blocks.push({
-        x: gap + c * (blockW + gap),
-        y: BLOCK_TOP + r * (BLOCK_H + BLOCK_GAP),
-        color: ROW_COLORS[r],
-        alive: true,
-        powerup: null,
-      });
-    }
-  }
-
-  // Sprinkle powerups into random distinct blocks
-  const types = Object.keys(POWERUPS);
-  const picks = [...blocks].sort(() => Math.random() - 0.5).slice(0, POWERUPS_PER_LEVEL);
-  for (const b of picks) b.powerup = types[Math.floor(Math.random() * types.length)];
+function blockColor(hits) {
+  const tier = Math.max(0, Math.ceil(hits / HITS_PER_COLOR) - 1);
+  return BLOCK_COLORS[tier % BLOCK_COLORS.length];
 }
 
-function destroyBlock(b) {
-  b.alive = false;
+function rotatePoint([x, y], turns) {
+  for (let i = 0; i < turns; i++) [x, y] = [-y, x];
+  return { x, y };
+}
+
+function createBlock(shape, turns, x, y, size, hits, inset = 0) {
+  const rotated = shape.points.map(p => rotatePoint(p, turns));
+  const minX = Math.min(...rotated.map(p => p.x));
+  const minY = Math.min(...rotated.map(p => p.y));
+  const position = p => ({ x: x + (p.x - minX) * size, y: y + (p.y - minY) * size });
+  const outline = rotated.map(position);
+  // Inset the outline, not the whole shape, so interlocking arms keep a uniform gutter.
+  const points = outline.map((point, i) => {
+    const prev = outline[(i + outline.length - 1) % outline.length];
+    const next = outline[(i + 1) % outline.length];
+    return {
+      x: point.x - (Math.sign(point.y - prev.y) + Math.sign(next.y - point.y)) * inset,
+      y: point.y + (Math.sign(point.x - prev.x) + Math.sign(next.x - point.x)) * inset,
+    };
+  });
+  const corners = points.map((point, i) => {
+    const prev = points[(i + points.length - 1) % points.length];
+    const next = points[(i + 1) % points.length];
+    const incoming = { x: Math.sign(point.x - prev.x), y: Math.sign(point.y - prev.y) };
+    const outgoing = { x: Math.sign(next.x - point.x), y: Math.sign(next.y - point.y) };
+    const radius = (size - inset * 2) * 0.38;
+    return {
+      point, incoming, outgoing, radius,
+      start: { x: point.x - incoming.x * radius, y: point.y - incoming.y * radius },
+      end: { x: point.x + outgoing.x * radius, y: point.y + outgoing.y * radius },
+      center: {
+        x: point.x + (outgoing.x - incoming.x) * radius,
+        y: point.y + (outgoing.y - incoming.y) * radius,
+      },
+    };
+  });
+  const path = new Path2D();
+  path.moveTo(corners[0].end.x, corners[0].end.y);
+  const edges = corners.map((corner, i) => {
+    const prev = corners[(i + corners.length - 1) % corners.length];
+    return { start: prev.end, end: corner.start, normal: { x: corner.incoming.y, y: -corner.incoming.x } };
+  });
+  for (let i = 1; i <= corners.length; i++) {
+    const corner = corners[i % corners.length];
+    path.lineTo(corner.start.x, corner.start.y);
+    path.arcTo(corner.point.x, corner.point.y, corner.end.x, corner.end.y, corner.radius);
+  }
+  path.closePath();
+  return {
+    path, corners, edges, hits, size: size - inset * 2,
+    label: position(rotatePoint(shape.label, turns)),
+    bounds: {
+      left: Math.min(...points.map(p => p.x)), right: Math.max(...points.map(p => p.x)),
+      top: Math.min(...points.map(p => p.y)), bottom: Math.max(...points.map(p => p.y)),
+    },
+  };
+}
+
+function blockLayouts() {
+  const layouts = [];
+  for (const shape of BLOCK_SHAPES) {
+    for (let turns = 0; turns < 4; turns++) {
+      const template = createBlock(shape, turns, 0, 0, 1, 1);
+      const cells = [];
+      for (let y = 0; y < template.bounds.bottom; y++) {
+        for (let x = 0; x < template.bounds.right; x++) {
+          if (ctx.isPointInPath(template.path, x + 0.5, y + 0.5)) cells.push({ x, y });
+        }
+      }
+      layouts.push({ shape, turns, cells });
+    }
+  }
+  return layouts;
+}
+
+function findBlockPlacement(layouts, occupied, column, row) {
+  const offset = Math.floor(Math.random() * layouts.length);
+  // Prefer Ls, Ts and zigzags; bars and squares fill the remaining holes.
+  for (const irregular of [true, false]) {
+    for (let i = 0; i < layouts.length; i++) {
+      const layout = layouts[(i + offset) % layouts.length];
+      if ((layout.shape.points.length > 4) !== irregular) continue;
+      for (const anchor of layout.cells) {
+        const x = column - anchor.x;
+        const y = row - anchor.y;
+        if (layout.cells.every(cell => {
+          const c = x + cell.x;
+          const r = y + cell.y;
+          return r >= 0 && r < occupied.length && c >= 0 && c < occupied[0].length && !occupied[r][c];
+        })) return { layout, x, y };
+      }
+    }
+  }
+  return null;
+}
+
+function buildBlocks() {
+  const cols = level > SHRINK_AFTER_LEVEL ? COLS * 2 : COLS;
+  const size = Math.min((W - BLOCK_GAP * 2) / cols, BLOCK_AREA_H / ROWS);
+  const left = (W - cols * size) / 2;
+  const occupied = Array.from({ length: ROWS }, () => Array(cols).fill(false));
+  const layouts = blockLayouts();
+  const types = Object.keys(POWERUPS);
+  blocks = [];
+  pickups = [];
+  for (let i = 0; i < POWERUPS_PER_LEVEL; i++) {
+    // Spread the passages out; keep two through the field and the third open to its pickup.
+    const column = Math.floor((i + 1) * cols / (POWERUPS_PER_LEVEL + 1)) + Math.floor(Math.random() * 3) - 1;
+    const row = Math.floor(Math.random() * ROWS);
+    for (let r = i < THROUGH_PATHS ? 0 : row; r < ROWS; r++) occupied[r][column] = true;
+    pickups.push({
+      x: left + (column + 0.5) * size,
+      y: BLOCK_TOP + (row + 0.5) * size,
+      type: types[Math.floor(Math.random() * types.length)],
+    });
+  }
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (occupied[r][c]) continue;
+      const placement = findBlockPlacement(layouts, occupied, c, r);
+      if (!placement) continue;
+      const { layout, x, y } = placement;
+      for (const cell of layout.cells) occupied[y + cell.y][x + cell.x] = true;
+      const hits = 1 + Math.floor(Math.random() * HITS_PER_LEVEL * level);
+      blocks.push(createBlock(layout.shape, layout.turns, left + x * size,
+        BLOCK_TOP + y * size, size, hits, BLOCK_GAP / 2));
+    }
+  }
+}
+
+function damageBlock(b, damage = 1) {
+  if (b.hits <= 0) return;
+  b.hits = Math.max(0, b.hits - damage);
+  if (b.hits > 0) return;
   score += 10;
-  if (b.powerup) {
-    if (b.powerup === 'heart') lives++;
-    setPowerup(b.powerup);
+}
+
+// Split a new ball off the collecting one, turned 45° but kept heading mostly up or down.
+function spawnBall(from) {
+  let angle = Math.PI / 4;
+  const turned = a => ({
+    vx: from.vx * Math.cos(a) - from.vy * Math.sin(a),
+    vy: from.vx * Math.sin(a) + from.vy * Math.cos(a),
+  });
+  let velocity = turned(angle);
+  if (Math.abs(velocity.vy) < Math.abs(velocity.vx)) velocity = turned(-angle);
+  balls.push({ x: from.x, y: from.y, ...velocity });
+}
+
+function collectPowerups(ball) {
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const pickup = pickups[i];
+    if (Math.hypot(ball.x - pickup.x, ball.y - pickup.y) > ballRadius() + POWERUP_R) continue;
+    pickups.splice(i, 1);
+    if (pickup.type === 'heart') lives++;
+    setPowerup(pickup.type);
+    if (pickup.type === 'multi') spawnBall(ball);
   }
 }
 
@@ -133,15 +282,15 @@ function newGame() {
 }
 
 function resetBall() {
-  ball.launched = false;
-  ball.vx = ball.vy = 0;
+  launched = false;
+  balls = [{ x: 0, y: 0, vx: 0, vy: 0 }];
   setPowerup(null);
   stickBallToPaddle();
 }
 
 function stickBallToPaddle() {
-  ball.x = paddle.x + paddleWidth() / 2;
-  ball.y = paddle.y - ballRadius();
+  balls[0].x = paddle.x + paddleWidth() / 2;
+  balls[0].y = paddle.y - ballRadius();
 }
 
 function launch() {
@@ -149,12 +298,12 @@ function launch() {
     newGame();
     return;
   }
-  if (ball.launched) return;
-  ball.launched = true;
+  if (launched) return;
+  launched = true;
   // Slight random angle, always upward
   const angle = (-Math.PI / 2) + (Math.random() - 0.5) * 0.8;
-  ball.vx = Math.cos(angle) * ballSpeed();
-  ball.vy = Math.sin(angle) * ballSpeed();
+  balls[0].vx = Math.cos(angle) * ballSpeed();
+  balls[0].vy = Math.sin(angle) * ballSpeed();
 }
 
 function movePaddleTo(x) {
@@ -201,16 +350,78 @@ function update(dt) {
   const dir = ((keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0)) * (reversed() ? -1 : 1);
   paddle.x = Math.max(0, Math.min(W - paddleWidth(), paddle.x + dir * PADDLE_SPEED * dt));
 
-  if (!ball.launched) {
+  if (!launched) {
     stickBallToPaddle();
     return;
   }
 
   if (active && (active.timeLeft -= dt) <= 0) setPowerup(null);
-  const r = ballRadius();
+  // Small steps stop a fast ball skipping thin arms or hitting a surviving block repeatedly.
+  const fastest = Math.max(...balls.map(ball => Math.hypot(ball.vx, ball.vy)));
+  const steps = Math.max(1, Math.ceil(fastest * dt / (BALL_R / 2)));
+  for (let i = 0; i < steps; i++) {
+    // Copy the list so a ball split off mid-step starts moving on the next step.
+    for (const ball of [...balls]) moveBall(ball, dt / steps);
+  }
+  balls = balls.filter(ball => ball.y - ballRadius() <= H);
 
+  if (blocks.every(b => b.hits === 0)) {
+    level++;
+    buildBlocks();
+    resetBall();
+  } else if (balls.length === 0) {
+    lives--;
+    if (lives <= 0) state = 'lost';
+    else resetBall();
+  }
+}
+
+function blockContact(b, radius, ball) {
+  const bounds = b.bounds;
+  if (ball.x + radius < bounds.left || ball.x - radius > bounds.right ||
+      ball.y + radius < bounds.top || ball.y - radius > bounds.bottom) return null;
+
+  let nearest = null;
+  function consider(x, y, nx, ny) {
+    const distanceSquared = (ball.x - x) ** 2 + (ball.y - y) ** 2;
+    if (!nearest || distanceSquared < nearest.distanceSquared) nearest = { x, y, nx, ny, distanceSquared };
+  }
+
+  for (const edge of b.edges) {
+    const dx = edge.end.x - edge.start.x;
+    const dy = edge.end.y - edge.start.y;
+    const t = Math.max(0, Math.min(1, ((ball.x - edge.start.x) * dx + (ball.y - edge.start.y) * dy) / (dx * dx + dy * dy)));
+    consider(edge.start.x + t * dx, edge.start.y + t * dy, edge.normal.x, edge.normal.y);
+  }
+  for (const corner of b.corners) {
+    const dx = ball.x - corner.center.x;
+    const dy = ball.y - corner.center.y;
+    const distance = Math.hypot(dx, dy);
+    // Only the quarter-circle between the two tangents belongs to this corner.
+    if (distance === 0 || dx * corner.outgoing.x + dy * corner.outgoing.y > 0 ||
+        dx * corner.incoming.x + dy * corner.incoming.y < 0) continue;
+    const convex = corner.incoming.x * corner.outgoing.y - corner.incoming.y * corner.outgoing.x > 0;
+    const direction = convex ? 1 : -1;
+    consider(corner.center.x + dx / distance * corner.radius,
+      corner.center.y + dy / distance * corner.radius, direction * dx / distance, direction * dy / distance);
+  }
+
+  const inside = ctx.isPointInPath(b.path, ball.x, ball.y);
+  const distance = Math.sqrt(nearest.distanceSquared);
+  if (!inside && distance > radius) return null;
+  const direction = inside ? -1 : 1;
+  return {
+    nx: distance === 0 ? nearest.nx : direction * (ball.x - nearest.x) / distance,
+    ny: distance === 0 ? nearest.ny : direction * (ball.y - nearest.y) / distance,
+    depth: radius + (inside ? distance : -distance),
+  };
+}
+
+function moveBall(ball, dt) {
   ball.x += ball.vx * dt;
   ball.y += ball.vy * dt;
+  collectPowerups(ball);
+  const r = ballRadius();
 
   // Walls and ceiling
   if (ball.x < r) { ball.x = r; ball.vx = Math.abs(ball.vx); }
@@ -231,43 +442,21 @@ function update(dt) {
 
   // Blocks
   for (const b of blocks) {
-    if (!b.alive) continue;
-    // Closest point on the block to the ball center
-    const cx = Math.max(b.x, Math.min(ball.x, b.x + blockW));
-    const cy = Math.max(b.y, Math.min(ball.y, b.y + BLOCK_H));
-    const dx = ball.x - cx;
-    const dy = ball.y - cy;
-    if (dx * dx + dy * dy > r * r) continue;
+    if (b.hits <= 0) continue;
+    const contact = blockContact(b, r, ball);
+    if (!contact) continue;
+    const incoming = ball.vx * contact.nx + ball.vy * contact.ny;
+    ball.x += contact.nx * (contact.depth + 0.01);
+    ball.y += contact.ny * (contact.depth + 0.01);
+    if (incoming >= 0) continue;
 
-    destroyBlock(b);
+    damageBlock(b, active?.type === 'double' ? 2 : 1);
 
-    if (active?.type === 'bomb') {
-      // Also destroy blocks within roughly one block of the one hit
-      for (const n of blocks) {
-        if (n.alive &&
-            Math.abs(n.x - b.x) <= blockW * 1.5 + BLOCK_GAP * 2 &&
-            Math.abs(n.y - b.y) <= BLOCK_H + BLOCK_GAP * 2) destroyBlock(n);
-      }
-    }
-
-    // A fireball keeps going; anything else bounces off the axis with the smaller penetration
-    if (active?.type === 'fire') continue;
-    const overlapX = r - Math.abs(dx);
-    const overlapY = r - Math.abs(dy);
-    if (dx === 0 && dy === 0) ball.vy = -ball.vy;
-    else if (overlapX < overlapY) ball.vx = dx > 0 ? Math.abs(ball.vx) : -Math.abs(ball.vx);
-    else ball.vy = dy > 0 ? Math.abs(ball.vy) : -Math.abs(ball.vy);
-    break; // one block per frame avoids double-bounce weirdness
-  }
-
-  if (blocks.every(b => !b.alive)) {
-    level++;
-    buildBlocks();
-    resetBall();
-  } else if (ball.y - r > H) {
-    lives--;
-    if (lives <= 0) state = 'lost';
-    else resetBall();
+    // Reflect around the actual surface normal, including curved and inside corners.
+    const dot = ball.vx * contact.nx + ball.vy * contact.ny;
+    ball.vx -= 2 * dot * contact.nx;
+    ball.vy -= 2 * dot * contact.ny;
+    break;
   }
 }
 
@@ -275,19 +464,40 @@ function draw() {
   ctx.clearRect(0, 0, W, H);
 
   for (const b of blocks) {
-    if (!b.alive) continue;
-    ctx.fillStyle = b.powerup ? MYSTERY_COLOR : b.color;
-    ctx.fillRect(b.x, b.y, blockW, BLOCK_H);
+    if (b.hits <= 0) continue;
+    ctx.fillStyle = blockColor(b.hits);
+    ctx.fill(b.path);
+    ctx.fillStyle = '#17212b';
+    ctx.font = `bold ${Math.max(11, Math.floor(b.size * 0.45))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.hits, b.label.x, b.label.y, b.size * 0.85);
   }
+  for (const pickup of pickups) {
+    const powerup = POWERUPS[pickup.type];
+    ctx.strokeStyle = powerup.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(pickup.x, pickup.y, POWERUP_R, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = powerup.color;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(powerup.bad ? '-' : '+', pickup.x, pickup.y);
+  }
+  ctx.textBaseline = 'alphabetic';
 
   ctx.fillStyle = active?.type === 'wide' ? POWERUPS.wide.color : '#ecf0f1';
   ctx.fillRect(paddle.x, paddle.y, paddleWidth(), PADDLE_H);
 
   ctx.fillStyle = active ? POWERUPS[active.type].color : '#ecf0f1';
   ctx.globalAlpha = active?.type === 'ghost' ? 0.15 : 1;
-  ctx.beginPath();
-  ctx.arc(ball.x, ball.y, ballRadius(), 0, Math.PI * 2);
-  ctx.fill();
+  for (const ball of balls) {
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ballRadius(), 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.globalAlpha = 1;
 
   ctx.fillStyle = '#ecf0f1';
@@ -306,8 +516,8 @@ function draw() {
 
   ctx.fillStyle = '#ecf0f1';
   ctx.textAlign = 'center';
-  if (state === 'playing' && !ball.launched) {
-    ctx.fillText('Press Space or click to launch', W / 2, H / 2 + 60);
+  if (state === 'playing' && !launched) {
+    ctx.fillText('Press Space or click to launch', W / 2, paddle.y - 60);
   } else if (state !== 'playing') {
     ctx.font = '32px sans-serif';
     ctx.fillText('Game over', W / 2, H / 2);
