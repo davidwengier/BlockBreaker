@@ -302,7 +302,7 @@
       assert(pickups.length === 1 && paddleEffect === 'wide', 'Distant pickup activated');
       ball.x = 224;
       moveBall(ball, 0);
-      assert(pickups.length === 0 && ball.effect === 'ice' && paddleEffect === null, 'Edge contact did not collect the pickup');
+      assert(pickups.length === 0 && ball.effect === 'ice' && paddleEffect === 'wide', 'Edge contact did not collect the pickup');
       assert(ball.x === 224 && ball.vx > 0 && ball.vy === 0 &&
         Math.abs(ball.vx - BALL_SPEED * 0.6) < 0.001, 'Speed pickup changed the trajectory');
     });
@@ -313,8 +313,8 @@
       pickups = [{ x: 300, y: 350, type: 'floor' }];
       Object.assign(ball, { x: 300, y: 350, vx: 0, vy: -BALL_SPEED });
       collectPowerups(ball);
-      assert(pickups.length === 0 && paddleEffect === 'floor' && ball.effect === null,
-        'Pickup did not activate the bottom wall');
+      assert(pickups.length === 0 && paddleEffect === 'floor' && ball.effect === 'double',
+        'Pickup did not activate the bottom wall alongside the ball effect');
 
       applyPowerup('multi', ball);
       for (const current of balls) {
@@ -332,10 +332,10 @@
       update(0);
       assert(lives === 3 && balls.length === 2, 'Bottom wall lost a ball or a life');
 
-      pickups = [{ x: ball.x, y: ball.y, type: 'ice' }];
+      pickups = [{ x: ball.x, y: ball.y, type: 'normal' }];
       collectPowerups(ball);
-      assert(paddleEffect === null && paddleWidth() === PADDLE_W && ball.effect === 'ice',
-        'Ball pickup did not replace the bottom wall');
+      assert(paddleEffect === null && paddleWidth() === PADDLE_W && ball.effect === 'double' &&
+        lastPickup === 'normal', 'Normal paddle did not replace only the bottom wall');
 
       Object.assign(ball, { x: 40, y: H - BALL_R + 1, vx: 192, vy: 256 });
       moveBall(ball, 0);
@@ -350,6 +350,8 @@
       for (const block of blocks) block.hits = 0;
       launched = true;
       update(0);
+      assert(state === 'cleared' && paddleEffect === null && paddleWidth() === PADDLE_W,
+        'Paddle was not normal on the level-complete screen');
       update(CONTINUE_DELAY);
       launch();
       assert(level === 2 && paddleEffect === null && paddleWidth() === PADDLE_W &&
@@ -369,7 +371,7 @@
       Object.assign(ball, { x: 300, y: 350, vx: 0, vy: -BALL_SPEED });
       collectPowerups(ball);
       assert(pickups.length === 0 && ball.effect === 'small' && ballRadius(ball) === BALL_R / 2 &&
-        ballRadius(other) === BALL_R && paddleEffect === null, 'Small ball pickup affected the wrong objects');
+        ballRadius(other) === BALL_R && paddleEffect === 'wide', 'Small ball pickup affected the wrong objects');
 
       const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3);
       blocks = [b];
@@ -379,9 +381,6 @@
       ball.x = 100 - BALL_R / 2 + 0.25;
       moveBall(ball, 0);
       assert(b.hits === 2 && ball.vx < 0, 'Small ball missed a block within its radius');
-
-      applyPowerup('wide', other);
-      assert(ball.effect === null && ballRadius(ball) === BALL_R, 'Paddle pickup did not end the small ball effect');
     });
 
     test('Fast and giant balls collect floating pickups using their actual contact', () => {
@@ -480,7 +479,7 @@
       assert(paddleEffect === null && balls[0].effect === null && lastPickup === null, 'New game kept the old powerup');
     });
 
-    test('Ball effects belong to one ball; paddle and ball effects cancel each other', () => {
+    test('Ball effects belong to one ball; paddle and ball effects are independent', () => {
       blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 9)];
       Object.assign(ball, { x: 300, y: 300, vx: 0, vy: -ballSpeed(ball) });
       launched = true;
@@ -497,11 +496,56 @@
         Math.abs(Math.hypot(ball.vx, ball.vy) - ballSpeed(null)) < 0.001, 'Speeds were not per ball');
 
       applyPowerup('wide', ball);
-      assert(paddleEffect === 'wide' && ball.effect === null && extra.effect === null, 'Paddle effect kept ball effects');
-      assert(Math.abs(Math.hypot(extra.vx, extra.vy) - ballSpeed(null)) < 0.001, 'Cleared effect kept its speed');
+      assert(paddleEffect === 'wide' && ball.effect === 'double' && extra.effect === 'fast',
+        'Paddle effect changed ball effects');
       applyPowerup('giant', extra);
-      assert(paddleEffect === null && paddleWidth() === PADDLE_W && extra.effect === 'giant' && ball.effect === null,
-        'Ball effect did not cancel the paddle effect');
+      assert(paddleEffect === 'wide' && extra.effect === 'giant' && ball.effect === 'double',
+        'Ball effect changed the paddle effect');
+    });
+
+    test('Sticky paddle holds balls until released at the paddle bounce angle', () => {
+      blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
+      applyPowerup('sticky', ball);
+      launched = true;
+      const offset = paddleWidth() * 0.75; // right of centre
+      Object.assign(ball, { x: paddle.x + offset, y: paddle.y - BALL_R + 1, vx: 50, vy: BALL_SPEED });
+      moveBall(ball, 0);
+      assert(ball.stuck === offset && ball.vx === 0 && ball.vy === 0, 'Ball did not stick to the paddle');
+
+      movePaddleTo(100);
+      update(0.1);
+      assert(ball.x === paddle.x + offset && ball.y === paddle.y - BALL_R && lives === 3,
+        'Stuck ball did not move with the paddle');
+      launch();
+      assert(ball.stuck === undefined && ball.vy < 0 && ball.vx > 0 &&
+        Math.abs(Math.hypot(ball.vx, ball.vy) - ballSpeed(ball)) < 0.001, 'Release did not use the bounce angle');
+
+      Object.assign(ball, { x: paddle.x + offset, y: paddle.y - BALL_R + 1, vx: 0, vy: BALL_SPEED });
+      moveBall(ball, 0);
+      applyPowerup('twin', ball);
+      assert(ball.stuck === undefined && ball.vy < 0, 'Changing paddle effect left the ball stuck');
+    });
+
+    test('Twin paddle mirrors the main paddle and both bounce the ball', () => {
+      blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
+      applyPowerup('twin', ball);
+      movePaddleTo(100);
+      const [left, right] = paddleXs();
+      assert(left === paddle.x && right === W - paddle.x - paddleWidth(), 'Twin paddle is not mirrored');
+      for (const x of [left, right]) {
+        Object.assign(ball, { x: x + paddleWidth() / 2, y: paddle.y - BALL_R + 1, vx: 0, vy: BALL_SPEED });
+        moveBall(ball, 0);
+        assert(ball.vy < 0 && Math.abs(ball.vx) < 0.001, `Paddle at ${x} did not bounce the ball`);
+      }
+      Object.assign(ball, { x: W / 2, y: paddle.y - BALL_R + 1, vx: 0, vy: BALL_SPEED });
+      moveBall(ball, 0);
+      assert(ball.vy > 0, 'Gap between twin paddles bounced the ball');
+
+      for (const type of Object.keys(POWERUPS).filter(t => POWERUPS[t].paddle && t !== 'twin')) {
+        applyPowerup('twin', ball);
+        applyPowerup(type, ball);
+        assert(paddleXs().length === 1, `${type} did not cancel the twin paddle`);
+      }
     });
 
     results.textContent += `\n${passed} passed, ${failures} failed`;

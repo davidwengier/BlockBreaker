@@ -32,9 +32,9 @@ const BALL_R = 7;
 const BALL_SPEED = 320; // px/sec
 
 // Floating pickups apply an effect without a bounce. Ball effects belong to the ball that
-// collected them, while paddle effects are shared; collecting either kind cancels the other.
+// collected them, while the paddle has one shared effect; the two kinds don't affect each other.
 // Effects last until replaced, a life is lost, or a new level starts. Multi-ball and the heart aren't effects:
-// they just add a (plain, red) ball or a life.
+// they just add a (plain, red) ball or a life. Normal paddle just clears the paddle effect.
 const POWERUPS_PER_LEVEL = 3;
 const POWERUP_REFILL_SECONDS = 10; // how often a missing pickup is replaced during play
 const POWERUP_R = 9;
@@ -43,6 +43,9 @@ const POWERUPS = {
   giant:   { color: '#66bb6a', label: 'Giant ball' },
   wide:    { color: '#ab47bc', label: 'Wide paddle', paddle: true },
   floor:   { color: '#42a5f5', label: 'Bottom wall', paddle: true },
+  sticky:  { color: '#c0ca33', label: 'Sticky paddle', paddle: true },
+  twin:    { color: '#26a69a', label: 'Twin paddle', paddle: true },
+  normal:  { color: '#e0e0e0', label: 'Normal paddle', paddle: true },
   double:  { color: '#ec407a', label: 'Double strength' },
   ice:     { color: '#4dd0e1', label: 'Slow ball' },
   heart:   { color: '#ffd700', label: 'Extra life!' },
@@ -57,8 +60,8 @@ const paddle = { x: (W - PADDLE_W) / 2, y: H - 30 };
 
 // Fill the side legend from the powerup table so the two never drift apart
 const legend = document.getElementById('legend');
-// Good powerups are filled circles and bad ones are hollow, so they're easy to tell apart.
-function addLegendItem(color, text, { bad = false, heart = false } = {}) {
+// Good powerups are filled and bad ones are hollow; paddle powerups are squares and ball powerups circles.
+function addLegendItem(color, text, { bad = false, heart = false, square = false } = {}) {
   const li = document.createElement('li');
   const dot = document.createElement('span');
   if (heart) {
@@ -66,7 +69,7 @@ function addLegendItem(color, text, { bad = false, heart = false } = {}) {
     dot.textContent = '♥';
     dot.style.color = color;
   } else {
-    dot.className = 'dot';
+    dot.className = square ? 'dot square' : 'dot';
     dot.style.background = bad ? 'transparent' : color;
     dot.style.borderColor = color;
   }
@@ -75,11 +78,12 @@ function addLegendItem(color, text, { bad = false, heart = false } = {}) {
   legend.append(li);
 }
 for (const [type, p] of Object.entries(POWERUPS)) {
-  addLegendItem(p.color, p.label, { bad: p.bad, heart: type === 'heart' });
+  addLegendItem(p.color, p.label, { bad: p.bad, heart: type === 'heart', square: p.paddle });
 }
 // Every ball in play; a life is only lost once all of them have fallen off the bottom.
 // Each ball is { x, y, vx, vy, effect, color }: its own powerup type and, for balls split off
-// by multi-ball, a base colour shown while it has no effect.
+// by multi-ball, a base colour shown while it has no effect. A ball held by the sticky paddle
+// also has `stuck`, its offset from the paddle's left edge.
 let balls = [];
 let launched = false;
 let levelStartScore = 0;
@@ -117,10 +121,33 @@ function applySpeed(ball) {
 }
 
 function setPaddleEffect(type) {
+  // Don't leave balls stranded on a paddle that is no longer sticky
+  if (type !== 'sticky') for (const ball of balls) releaseBall(ball);
   const centre = paddle.x + paddleWidth() / 2;
   paddleEffect = type;
   // Widen/narrow around the centre so the paddle doesn't jump
   paddle.x = Math.max(0, Math.min(W - paddleWidth(), centre - paddleWidth() / 2));
+}
+
+// Left edges of every paddle in play; the twin mirrors the main paddle across the board.
+function paddleXs() {
+  if (paddleEffect === 'twin') return [paddle.x, W - paddle.x - paddleWidth()];
+  return [paddle.x];
+}
+
+// Bounce angle from where the ball meets the paddle: up to 60° from vertical at the ends.
+function bounceOffPaddle(ball, paddleX) {
+  const pw = paddleWidth();
+  const hit = Math.max(-1, Math.min(1, (ball.x - (paddleX + pw / 2)) / (pw / 2)));
+  const angle = hit * (Math.PI / 3);
+  ball.vx = Math.sin(angle) * ballSpeed(ball);
+  ball.vy = -Math.cos(angle) * ballSpeed(ball);
+}
+
+function releaseBall(ball) {
+  if (ball.stuck === undefined) return;
+  delete ball.stuck;
+  bounceOffPaddle(ball, paddle.x);
 }
 
 function setBallEffect(ball, type) {
@@ -134,10 +161,8 @@ function applyPowerup(type, ball) {
   if (type === 'multi') {
     spawnBall(ball);
   } else if (POWERUPS[type].paddle) {
-    for (const b of balls) setBallEffect(b, null);
-    setPaddleEffect(type);
+    setPaddleEffect(type === 'normal' ? null : type);
   } else {
-    setPaddleEffect(null);
     setBallEffect(ball, type);
   }
 }
@@ -377,6 +402,8 @@ function newGame() {
 function completeLevel() {
   state = 'cleared';
   balls = [];
+  // Show the normal paddle during the celebration; nextLevel resets it again too.
+  setPaddleEffect(null);
   celebration = {
     levelScore: score - levelStartScore, time: 0, nextRocket: 0, rockets: [], sparks: [],
   };
@@ -449,7 +476,10 @@ function launch() {
     newGame();
     return;
   }
-  if (launched) return;
+  if (launched) {
+    for (const ball of balls) releaseBall(ball);
+    return;
+  }
   launched = true;
   // Slight random angle, always upward
   const angle = (-Math.PI / 2) + (Math.random() - 0.5) * 0.8;
@@ -508,13 +538,20 @@ function update(dt) {
     stickBallToPaddle();
     return;
   }
+  for (const ball of balls) {
+    if (ball.stuck === undefined) continue;
+    ball.x = paddle.x + Math.min(ball.stuck, paddleWidth());
+    ball.y = paddle.y - ballRadius(ball);
+  }
 
   // Small steps stop a fast ball skipping thin arms or hitting a surviving block repeatedly.
   const fastest = Math.max(...balls.map(ball => Math.hypot(ball.vx, ball.vy)));
   const steps = Math.max(1, Math.ceil(fastest * dt / (BALL_R / 2)));
   for (let i = 0; i < steps; i++) {
     // Copy the list so a ball split off mid-step starts moving on the next step.
-    for (const ball of [...balls]) moveBall(ball, dt / steps);
+    for (const ball of [...balls]) {
+      if (ball.stuck === undefined) moveBall(ball, dt / steps);
+    }
   }
   balls = balls.filter(ball => ball.y - ballRadius(ball) <= H);
 
@@ -595,13 +632,20 @@ function moveBall(ball, dt) {
   // The bottom wall replaces the paddle, so its position cannot change the bounce angle.
   const pw = paddleWidth();
   if (paddleEffect !== 'floor' && ball.vy > 0 &&
-      ball.y + r >= paddle.y && ball.y - r <= paddle.y + PADDLE_H &&
-      ball.x >= paddle.x - r && ball.x <= paddle.x + pw + r) {
-    const hit = (ball.x - (paddle.x + pw / 2)) / (pw / 2); // -1..1
-    const angle = hit * (Math.PI / 3); // up to 60° from vertical
-    ball.vx = Math.sin(angle) * ballSpeed(ball);
-    ball.vy = -Math.cos(angle) * ballSpeed(ball);
-    ball.y = paddle.y - r;
+      ball.y + r >= paddle.y && ball.y - r <= paddle.y + PADDLE_H) {
+    const hitX = paddleXs().find(x => ball.x >= x - r && ball.x <= x + pw + r);
+    if (hitX !== undefined) {
+      ball.y = paddle.y - r;
+      if (paddleEffect === 'sticky') {
+        // Hold the ball until the player releases it; it keeps its spot on the paddle.
+        ball.stuck = Math.max(0, Math.min(pw, ball.x - paddle.x));
+        ball.x = paddle.x + ball.stuck;
+        ball.vx = 0;
+        ball.vy = 0;
+      } else {
+        bounceOffPaddle(ball, hitX);
+      }
+    }
   }
 
   // Blocks
@@ -655,7 +699,13 @@ function draw() {
     ctx.strokeStyle = powerup.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(pickup.x, pickup.y, POWERUP_R, 0, Math.PI * 2);
+    if (powerup.paddle) {
+      // Paddle powerups are squares; ball powerups are circles.
+      const half = POWERUP_R * 0.85;
+      ctx.rect(pickup.x - half, pickup.y - half, half * 2, half * 2);
+    } else {
+      ctx.arc(pickup.x, pickup.y, POWERUP_R, 0, Math.PI * 2);
+    }
     ctx.stroke();
     if (!powerup.bad) {
       ctx.fillStyle = powerup.color;
@@ -668,7 +718,7 @@ function draw() {
   if (paddleEffect === 'floor') {
     ctx.fillRect(0, H - 2, W, 2);
   } else {
-    ctx.fillRect(paddle.x, paddle.y, paddleWidth(), PADDLE_H);
+    for (const x of paddleXs()) ctx.fillRect(x, paddle.y, paddleWidth(), PADDLE_H);
   }
 
   for (const ball of balls) {
