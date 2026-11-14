@@ -497,6 +497,10 @@ function pointerX(clientX) {
 }
 
 window.addEventListener('keydown', e => {
+  if (e.code === 'KeyL') {
+    if (!e.repeat) legend.hidden = !legend.hidden;
+    return;
+  }
   keys[e.code] = true;
   if (e.code === 'Space') {
     e.preventDefault();

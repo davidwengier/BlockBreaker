@@ -34,6 +34,17 @@
       }
     }
 
+    test('L toggles the powerup legend without toggling on key repeat', () => {
+      const keyEvent = (repeat = false) => new KeyboardEvent('keydown', { code: 'KeyL', repeat });
+      legend.hidden = true;
+      window.dispatchEvent(keyEvent());
+      assert(!legend.hidden, 'L did not show the legend');
+      window.dispatchEvent(keyEvent(true));
+      assert(!legend.hidden, 'Holding L toggled the legend again');
+      window.dispatchEvent(keyEvent());
+      assert(legend.hidden, 'L did not hide the legend');
+    });
+
     test('L and T outlines rotate without filling their notches', () => {
       const examples = [
         { shape: BLOCK_SHAPES[0], width: 2, height: 3, solid: [0.5, 1.5], empty: [1.5, 0.5] },
