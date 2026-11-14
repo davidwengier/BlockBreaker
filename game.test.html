@@ -301,6 +301,27 @@
       assert(pickups.length === POWERUPS_PER_LEVEL && !pickups.includes(pickup), 'Cleared level kept the old pickups');
     });
 
+    test('Powerups last until the next pickup, through lost lives and new levels', () => {
+      blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 2)];
+      setPowerup('wide');
+      Object.assign(ball, { x: 320, y: 200, vx: 0, vy: 0 });
+      launched = true;
+      for (let i = 0; i < 1200; i++) update(0.05); // a full minute
+      assert(active?.type === 'wide', 'Powerup expired over time');
+      balls[0].y = H + BALL_R * 3;
+      update(0);
+      assert(lives === 2 && active?.type === 'wide', 'Powerup ended on a lost life');
+      blocks[0].hits = 0;
+      launched = true;
+      update(0);
+      assert(level === 2 && active?.type === 'wide', 'Powerup ended on a new level');
+      pickups = [{ x: balls[0].x, y: balls[0].y, type: 'ice' }];
+      collectPowerups(balls[0]);
+      assert(active?.type === 'ice', 'Next pickup did not replace the powerup');
+      newGame();
+      assert(active === null, 'New game kept the old powerup');
+    });
+
     results.textContent += `\n${passed} passed, ${failures} failed`;
     document.body.dataset.failures = failures;
     document.title = `${failures ? 'FAIL' : 'PASS'}: Block Breaker tests`;
