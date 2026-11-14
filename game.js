@@ -48,7 +48,6 @@ const POWERUPS = {
   // Negative powerups
   shrink:  { color: '#8d6e63', label: 'Skinny paddle', bad: true, paddle: true },
   fast:    { color: '#d50000', label: 'Fast ball', bad: true },
-  reverse: { color: '#aeea00', label: 'Reversed controls', bad: true, paddle: true },
   ghost:   { color: '#78909c', label: 'Ghost ball', bad: true },
 };
 
@@ -95,8 +94,6 @@ const paddleWidth = () => {
   if (paddleEffect === 'shrink') return PADDLE_W * 0.6;
   return PADDLE_W;
 };
-const reversed = () => paddleEffect === 'reverse';
-
 function ballSpeed(ball) {
   const base = BALL_SPEED * (1 + SPEED_STEP * (level - 1));
   if (ball?.effect === 'ice') return base * 0.6;
@@ -461,8 +458,7 @@ function movePaddleTo(x) {
 
 function pointerX(clientX) {
   const rect = canvas.getBoundingClientRect();
-  const x = (clientX - rect.left) * (W / rect.width);
-  return reversed() ? W - x : x;
+  return (clientX - rect.left) * (W / rect.width);
 }
 
 window.addEventListener('keydown', e => {
@@ -479,7 +475,7 @@ const locked = () => document.pointerLockElement === canvas;
 canvas.addEventListener('pointermove', e => {
   if (locked()) {
     const rect = canvas.getBoundingClientRect();
-    movePaddleTo(paddle.x + paddleWidth() / 2 + e.movementX * (W / rect.width) * (reversed() ? -1 : 1));
+    movePaddleTo(paddle.x + paddleWidth() / 2 + e.movementX * (W / rect.width));
   } else if (e.pointerType !== 'mouse') {
     movePaddleTo(pointerX(e.clientX));
   }
@@ -500,7 +496,7 @@ function update(dt) {
   }
   if (state !== 'playing') return;
 
-  const dir = ((keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0)) * (reversed() ? -1 : 1);
+  const dir = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
   paddle.x = Math.max(0, Math.min(W - paddleWidth(), paddle.x + dir * PADDLE_SPEED * dt));
 
   if (!launched) {
