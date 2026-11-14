@@ -38,17 +38,17 @@ const POWERUPS_PER_LEVEL = 3;
 const POWERUP_REFILL_SECONDS = 10; // how often a missing pickup is replaced during play
 const POWERUP_R = 9;
 const POWERUPS = {
-  multi:   { color: '#ff5722', label: 'Multi-ball: a new ball splits off' },
+  multi:   { color: '#ff5722', label: 'Multi-ball' },
   giant:   { color: '#66bb6a', label: 'Giant ball' },
   wide:    { color: '#ab47bc', label: 'Wide paddle' },
-  double:  { color: '#ec407a', label: 'Double strength: hits count twice' },
+  double:  { color: '#ec407a', label: 'Double strength' },
   heart:   { color: '#ffd700', label: 'Extra life!' },
   // Negative powerups
-  ice:     { color: '#4dd0e1', label: 'Ice: slower ball', bad: true },
-  shrink:  { color: '#8d6e63', label: 'Shrunk paddle', bad: true },
+  ice:     { color: '#4dd0e1', label: 'Slow ball', bad: true },
+  shrink:  { color: '#8d6e63', label: 'Skinny paddle', bad: true },
   fast:    { color: '#d50000', label: 'Fast ball', bad: true },
   reverse: { color: '#aeea00', label: 'Reversed controls', bad: true },
-  ghost:   { color: '#78909c', label: 'Ghost: ball is nearly invisible', bad: true },
+  ghost:   { color: '#78909c', label: 'Ghost ball', bad: true },
 };
 
 const paddle = { x: (W - PADDLE_W) / 2, y: H - 30 };
