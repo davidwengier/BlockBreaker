@@ -307,6 +307,59 @@
         Math.abs(ball.vx - BALL_SPEED * 0.6) < 0.001, 'Speed pickup changed the trajectory');
     });
 
+    test('Full width paddle catches balls at both edges and ends like other paddle effects', () => {
+      blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
+      applyPowerup('double', ball);
+      pickups = [{ x: 300, y: 350, type: 'full' }];
+      Object.assign(ball, { x: 300, y: 350, vx: 0, vy: -BALL_SPEED });
+      collectPowerups(ball);
+      assert(pickups.length === 0 && paddleEffect === 'full' && ball.effect === null &&
+        paddle.x === 0 && paddleWidth() === W, 'Pickup did not give a full width paddle');
+
+      movePaddleTo(W);
+      assert(paddle.x === 0, 'Full width paddle moved outside the board');
+      for (const x of [BALL_R + 1, W - BALL_R - 1]) {
+        Object.assign(ball, { x, y: paddle.y - BALL_R + 1, vx: 0, vy: BALL_SPEED });
+        moveBall(ball, 0);
+        assert(ball.vy < 0, `Full width paddle missed the ball at ${x}`);
+      }
+
+      pickups = [{ x: ball.x, y: ball.y, type: 'ice' }];
+      collectPowerups(ball);
+      assert(paddleEffect === null && paddleWidth() === PADDLE_W && ball.effect === 'ice',
+        'Ball pickup did not replace the full width paddle');
+
+      applyPowerup('full', ball);
+      Object.assign(ball, { y: H + BALL_R + 1, vx: 0, vy: BALL_SPEED });
+      launched = true;
+      update(0);
+      assert(lives === 2 && paddleEffect === null && paddleWidth() === PADDLE_W,
+        'Full width paddle survived a lost life');
+    });
+
+    test('Small ball affects only the collecting ball and uses its smaller collision radius', () => {
+      applyPowerup('multi', ball);
+      const other = balls[1];
+      applyPowerup('wide', ball);
+      pickups = [{ x: 300, y: 350, type: 'small' }];
+      Object.assign(ball, { x: 300, y: 350, vx: 0, vy: -BALL_SPEED });
+      collectPowerups(ball);
+      assert(pickups.length === 0 && ball.effect === 'small' && ballRadius(ball) === BALL_R / 2 &&
+        ballRadius(other) === BALL_R && paddleEffect === null, 'Small ball pickup affected the wrong objects');
+
+      const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3);
+      blocks = [b];
+      Object.assign(ball, { x: 100 - BALL_R * 0.75, y: 95, vx: BALL_SPEED, vy: 0 });
+      moveBall(ball, 0);
+      assert(b.hits === 3 && ball.vx > 0, 'Small ball collided at the normal radius');
+      ball.x = 100 - BALL_R / 2 + 0.25;
+      moveBall(ball, 0);
+      assert(b.hits === 2 && ball.vx < 0, 'Small ball missed a block within its radius');
+
+      applyPowerup('wide', other);
+      assert(ball.effect === null && ballRadius(ball) === BALL_R, 'Paddle pickup did not end the small ball effect');
+    });
+
     test('Fast and giant balls collect floating pickups using their actual contact', () => {
       blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
       pickups = [{ x: 250, y: 350, type: 'heart' }];

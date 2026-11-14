@@ -42,11 +42,13 @@ const POWERUPS = {
   multi:   { color: '#ff5722', label: 'Multi-ball' },
   giant:   { color: '#66bb6a', label: 'Giant ball' },
   wide:    { color: '#ab47bc', label: 'Wide paddle', paddle: true },
+  full:    { color: '#42a5f5', label: 'Full width paddle', paddle: true },
   double:  { color: '#ec407a', label: 'Double strength' },
   ice:     { color: '#4dd0e1', label: 'Slow ball' },
   heart:   { color: '#ffd700', label: 'Extra life!' },
   // Negative powerups
   shrink:  { color: '#8d6e63', label: 'Skinny paddle', bad: true, paddle: true },
+  small:   { color: '#ffcc80', label: 'Small ball', bad: true },
   fast:    { color: '#d50000', label: 'Fast ball', bad: true },
   ghost:   { color: '#78909c', label: 'Ghost ball', bad: true },
 };
@@ -88,8 +90,13 @@ let paddleEffect = null; // type of the shared paddle powerup, if any
 let lastPickup = null; // type of the most recent pickup, shown in the corner
 const keys = {};
 
-const ballRadius = ball => (ball?.effect === 'giant' ? BALL_R * 2 : BALL_R);
+const ballRadius = ball => {
+  if (ball?.effect === 'giant') return BALL_R * 2;
+  if (ball?.effect === 'small') return BALL_R / 2;
+  return BALL_R;
+};
 const paddleWidth = () => {
+  if (paddleEffect === 'full') return W;
   if (paddleEffect === 'wide') return PADDLE_W * 1.6;
   if (paddleEffect === 'shrink') return PADDLE_W * 0.6;
   return PADDLE_W;
