@@ -32,7 +32,7 @@ const BALL_R = 7;
 const BALL_SPEED = 320; // px/sec
 
 // Floating pickups change the ball's colour and apply an effect without a bounce.
-// Only one is active at a time; it lasts until the next pickup replaces it.
+// Only one is active at a time; it lasts until the next pickup replaces it or a life is lost.
 const POWERUPS_PER_LEVEL = 3;
 const POWERUP_REFILL_SECONDS = 10; // how often a missing pickup is replaced during play
 const POWERUP_R = 9;
@@ -470,6 +470,7 @@ function update(dt) {
     completeLevel();
   } else if (balls.length === 0) {
     lives--;
+    setPowerup(null); // the new ball starts without the old powerup
     if (lives <= 0) state = 'lost';
     else resetBall();
   }
