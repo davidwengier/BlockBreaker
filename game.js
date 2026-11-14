@@ -30,21 +30,21 @@ const BALL_R = 7;
 const BALL_SPEED = 320; // px/sec
 
 // Floating pickups change the ball's colour and apply an effect without a bounce.
-// Only one is active at a time, ending on timeout, a lost life or a new level.
+// Only one is active at a time; it lasts until the next pickup replaces it.
 const POWERUPS_PER_LEVEL = 3;
 const POWERUP_R = 9;
 const POWERUPS = {
-  multi:   { color: '#ff5722', duration: 3,  label: 'Multi-ball: a new ball splits off' },
-  giant:   { color: '#66bb6a', duration: 10, label: 'Giant ball' },
-  wide:    { color: '#ab47bc', duration: 12, label: 'Wide paddle' },
-  double:  { color: '#ec407a', duration: 8,  label: 'Double strength: hits count twice' },
-  heart:   { color: '#ffd700', duration: 3,  label: 'Extra life!' },
+  multi:   { color: '#ff5722', label: 'Multi-ball: a new ball splits off' },
+  giant:   { color: '#66bb6a', label: 'Giant ball' },
+  wide:    { color: '#ab47bc', label: 'Wide paddle' },
+  double:  { color: '#ec407a', label: 'Double strength: hits count twice' },
+  heart:   { color: '#ffd700', label: 'Extra life!' },
   // Negative powerups
-  ice:     { color: '#4dd0e1', duration: 10, label: 'Ice: slower ball', bad: true },
-  shrink:  { color: '#8d6e63', duration: 10, label: 'Shrunk paddle', bad: true },
-  fast:    { color: '#d50000', duration: 8,  label: 'Fast ball', bad: true },
-  reverse: { color: '#aeea00', duration: 8,  label: 'Reversed controls', bad: true },
-  ghost:   { color: '#78909c', duration: 8,  label: 'Ghost: ball is nearly invisible', bad: true },
+  ice:     { color: '#4dd0e1', label: 'Ice: slower ball', bad: true },
+  shrink:  { color: '#8d6e63', label: 'Shrunk paddle', bad: true },
+  fast:    { color: '#d50000', label: 'Fast ball', bad: true },
+  reverse: { color: '#aeea00', label: 'Reversed controls', bad: true },
+  ghost:   { color: '#78909c', label: 'Ghost: ball is nearly invisible', bad: true },
 };
 
 const paddle = { x: (W - PADDLE_W) / 2, y: H - 30 };
@@ -70,7 +70,7 @@ for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, { bad: 
 let balls = [];
 let launched = false;
 let blocks, pickups, score, lives, level, state; // state: 'playing' | 'lost'
-let active = null; // { type, timeLeft } for the current powerup
+let active = null; // { type } for the current powerup
 const keys = {};
 
 const ballRadius = () => (active?.type === 'giant' ? BALL_R * 2 : BALL_R);
@@ -101,7 +101,7 @@ function applySpeed() {
 
 function setPowerup(type) {
   const centre = paddle.x + paddleWidth() / 2;
-  active = type ? { type, timeLeft: POWERUPS[type].duration } : null;
+  active = type ? { type } : null;
   // Widen/narrow around the centre so the paddle doesn't jump
   paddle.x = Math.max(0, Math.min(W - paddleWidth(), centre - paddleWidth() / 2));
   applySpeed();
@@ -278,13 +278,13 @@ function newGame() {
   level = 1;
   state = 'playing';
   buildBlocks();
+  setPowerup(null);
   resetBall();
 }
 
 function resetBall() {
   launched = false;
   balls = [{ x: 0, y: 0, vx: 0, vy: 0 }];
-  setPowerup(null);
   stickBallToPaddle();
 }
 
@@ -355,7 +355,6 @@ function update(dt) {
     return;
   }
 
-  if (active && (active.timeLeft -= dt) <= 0) setPowerup(null);
   // Small steps stop a fast ball skipping thin arms or hitting a surviving block repeatedly.
   const fastest = Math.max(...balls.map(ball => Math.hypot(ball.vx, ball.vy)));
   const steps = Math.max(1, Math.ceil(fastest * dt / (BALL_R / 2)));
@@ -511,7 +510,7 @@ function draw() {
 
   if (active) {
     ctx.fillStyle = POWERUPS[active.type].color;
-    ctx.fillText(`${POWERUPS[active.type].label} (${Math.ceil(active.timeLeft)}s)`, W - 10, H - 6);
+    ctx.fillText(POWERUPS[active.type].label, W - 10, H - 6);
   }
 
   ctx.fillStyle = '#ecf0f1';
