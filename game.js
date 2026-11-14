@@ -34,6 +34,7 @@ const BALL_SPEED = 320; // px/sec
 // Floating pickups change the ball's colour and apply an effect without a bounce.
 // Only one is active at a time; it lasts until the next pickup replaces it.
 const POWERUPS_PER_LEVEL = 3;
+const POWERUP_REFILL_SECONDS = 10; // how often a missing pickup is replaced during play
 const POWERUP_R = 9;
 const POWERUPS = {
   multi:   { color: '#ff5722', label: 'Multi-ball: a new ball splits off' },
@@ -72,6 +73,7 @@ for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, { bad: 
 let balls = [];
 let launched = false;
 let levelStartScore = 0;
+let refillTimer = 0; // seconds of play since the last pickup refill check
 let celebration = null; // fireworks and score summary while state is 'cleared'
 let blocks, pickups, score, lives, level, state; // state: 'playing' | 'cleared' | 'lost'
 let active = null; // { type } for the current powerup
@@ -218,9 +220,9 @@ function buildBlocks() {
   const left = (W - cols * size) / 2;
   const occupied = Array.from({ length: ROWS }, () => Array(cols).fill(false));
   const layouts = blockLayouts();
-  const types = Object.keys(POWERUPS);
   blocks = [];
   pickups = [];
+  refillTimer = 0;
   for (let i = 0; i < POWERUPS_PER_LEVEL; i++) {
     // Spread the passages out; keep two through the field and the third open to its pickup.
     const column = Math.floor((i + 1) * cols / (POWERUPS_PER_LEVEL + 1)) + Math.floor(Math.random() * 3) - 1;
@@ -229,7 +231,7 @@ function buildBlocks() {
     pickups.push({
       x: left + (column + 0.5) * size,
       y: BLOCK_TOP + (row + 0.5) * size,
-      type: types[Math.floor(Math.random() * types.length)],
+      type: randomPowerupType(),
     });
   }
   for (let r = 0; r < ROWS; r++) {
@@ -244,6 +246,34 @@ function buildBlocks() {
         BLOCK_TOP + y * size, size, hits, BLOCK_GAP / 2));
     }
   }
+}
+
+function randomPowerupType() {
+  const types = Object.keys(POWERUPS);
+  return types[Math.floor(Math.random() * types.length)];
+}
+
+// Is there room for a pickup here, with a straight run up from below so a ball can reach it?
+function canPlacePickup(x, y) {
+  const probe = { x, y };
+  const radius = POWERUP_R + BALL_R;
+  for (; probe.y < paddle.y - BALL_R * 4; probe.y += BALL_R) {
+    if (blocks.some(b => b.hits > 0 && blockContact(b, probe.y === y ? radius : BALL_R, probe))) return false;
+  }
+  const crowded = item => Math.hypot(item.x - x, item.y - y) < POWERUP_R * 4 + ballRadius();
+  return !pickups.some(crowded) && !balls.some(crowded);
+}
+
+// Add one pickup at a random reachable spot; gives up quietly if the board has no room.
+function spawnPickup() {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const x = POWERUP_R * 2 + Math.random() * (W - POWERUP_R * 4);
+    const y = BLOCK_TOP + POWERUP_R + Math.random() * (paddle.y - 100 - BLOCK_TOP);
+    if (!canPlacePickup(x, y)) continue;
+    pickups.push({ x, y, type: randomPowerupType() });
+    return true;
+  }
+  return false;
 }
 
 function damageBlock(b, damage = 1) {
@@ -429,6 +459,12 @@ function update(dt) {
     for (const ball of [...balls]) moveBall(ball, dt / steps);
   }
   balls = balls.filter(ball => ball.y - ballRadius() <= H);
+
+  // Every few seconds of play, top the board back up to its usual number of pickups.
+  if ((refillTimer += dt) >= POWERUP_REFILL_SECONDS) {
+    refillTimer -= POWERUP_REFILL_SECONDS;
+    if (pickups.length < POWERUPS_PER_LEVEL) spawnPickup();
+  }
 
   if (blocks.every(b => b.hits === 0)) {
     completeLevel();
