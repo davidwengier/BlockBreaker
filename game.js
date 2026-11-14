@@ -33,6 +33,7 @@ const BALL_SPEED = 320; // px/sec
 
 // Floating pickups change the ball's colour and apply an effect without a bounce.
 // Only one is active at a time; it lasts until the next pickup replaces it or a life is lost.
+// The heart is the exception: it just adds a life and leaves the current powerup alone.
 const POWERUPS_PER_LEVEL = 3;
 const POWERUP_REFILL_SECONDS = 10; // how often a missing pickup is replaced during play
 const POWERUP_R = 9;
@@ -54,12 +55,18 @@ const paddle = { x: (W - PADDLE_W) / 2, y: H - 30 };
 
 // Fill the side legend from the powerup table so the two never drift apart
 const legend = document.getElementById('legend');
-function addLegendItem(color, text, { bad = false, square = false } = {}) {
+function addLegendItem(color, text, { bad = false, square = false, heart = false } = {}) {
   const li = document.createElement('li');
   const dot = document.createElement('span');
-  dot.className = square ? 'dot square' : 'dot';
-  dot.style.background = square ? color : 'transparent';
-  dot.style.borderColor = color;
+  if (heart) {
+    dot.className = 'heart';
+    dot.textContent = '♥';
+    dot.style.color = color;
+  } else {
+    dot.className = square ? 'dot square' : 'dot';
+    dot.style.background = square ? color : 'transparent';
+    dot.style.borderColor = color;
+  }
   if (bad) li.className = 'bad';
   li.append(dot, text);
   legend.append(li);
@@ -68,7 +75,9 @@ for (let i = 0; i < BLOCK_COLORS.length; i++) {
   const max = (i + 1) * HITS_PER_COLOR;
   addLegendItem(blockColor(max), `${max - HITS_PER_COLOR + 1}-${max} hits`, { square: true });
 }
-for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, { bad: p.bad });
+for (const [type, p] of Object.entries(POWERUPS)) {
+  addLegendItem(p.color, p.label, { bad: p.bad, heart: type === 'heart' });
+}
 // Every ball in play; a life is only lost once all of them have fallen off the bottom.
 let balls = [];
 let launched = false;
@@ -321,7 +330,10 @@ function collectPowerups(ball) {
     const pickup = pickups[i];
     if (Math.hypot(ball.x - pickup.x, ball.y - pickup.y) > ballRadius() + POWERUP_R) continue;
     pickups.splice(i, 1);
-    if (pickup.type === 'heart') lives++;
+    if (pickup.type === 'heart') {
+      lives++;
+      continue;
+    }
     setPowerup(pickup.type);
     if (pickup.type === 'multi') spawnBall(ball);
   }
@@ -581,6 +593,15 @@ function moveBall(ball, dt) {
   }
 }
 
+function drawHeart(x, y, r, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y + r);
+  ctx.bezierCurveTo(x - r * 1.5, y, x - r * 0.8, y - r * 1.3, x, y - r * 0.45);
+  ctx.bezierCurveTo(x + r * 0.8, y - r * 1.3, x + r * 1.5, y, x, y + r);
+  ctx.fill();
+}
+
 function draw() {
   ctx.clearRect(0, 0, W, H);
 
@@ -596,6 +617,10 @@ function draw() {
   }
   for (const pickup of pickups) {
     const powerup = POWERUPS[pickup.type];
+    if (pickup.type === 'heart') {
+      drawHeart(pickup.x, pickup.y, POWERUP_R, powerup.color);
+      continue;
+    }
     ctx.strokeStyle = powerup.color;
     ctx.lineWidth = 2;
     ctx.beginPath();

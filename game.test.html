@@ -285,10 +285,13 @@
 
     test('Floating pickups activate on touch without bouncing and are collected once', () => {
       blocks = [];
+      setPowerup('wide');
       pickups = [{ x: 200, y: 350, type: 'heart' }];
       Object.assign(ball, { x: 190, y: 350, vx: BALL_SPEED, vy: 0 });
       moveBall(ball, 0.01);
-      assert(pickups.length === 0 && lives === 4 && active.type === 'heart', 'Pickup did not activate and disappear');
+      assert(pickups.length === 0 && lives === 4, 'Heart did not add a life and disappear');
+      assert(active?.type === 'wide' && paddleWidth() === PADDLE_W * 1.6,
+        'Heart replaced or cleared the current powerup');
       assert(Math.abs(ball.x - 193.2) < 0.001 && ball.y === 350 &&
         ball.vx === BALL_SPEED && ball.vy === 0, 'Pickup moved or bounced the ball');
       moveBall(ball, 0);
@@ -296,7 +299,7 @@
 
       pickups = [{ x: 240, y: 350, type: 'ice' }];
       moveBall(ball, 0);
-      assert(pickups.length === 1 && active.type === 'heart', 'Distant pickup activated');
+      assert(pickups.length === 1 && active.type === 'wide', 'Distant pickup activated');
       ball.x = 224;
       moveBall(ball, 0);
       assert(pickups.length === 0 && active.type === 'ice', 'Edge contact did not collect the pickup');
