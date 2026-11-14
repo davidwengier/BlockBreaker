@@ -42,9 +42,9 @@ const POWERUPS = {
   giant:   { color: '#66bb6a', label: 'Giant ball' },
   wide:    { color: '#ab47bc', label: 'Wide paddle' },
   double:  { color: '#ec407a', label: 'Double strength' },
+  ice:     { color: '#4dd0e1', label: 'Slow ball' },
   heart:   { color: '#ffd700', label: 'Extra life!' },
   // Negative powerups
-  ice:     { color: '#4dd0e1', label: 'Slow ball', bad: true },
   shrink:  { color: '#8d6e63', label: 'Skinny paddle', bad: true },
   fast:    { color: '#d50000', label: 'Fast ball', bad: true },
   reverse: { color: '#aeea00', label: 'Reversed controls', bad: true },
@@ -627,11 +627,6 @@ function draw() {
       ctx.fillStyle = powerup.color;
       ctx.fill();
     }
-    ctx.fillStyle = powerup.bad ? powerup.color : '#17212b';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(powerup.bad ? '-' : '+', pickup.x, pickup.y);
   }
   ctx.textBaseline = 'alphabetic';
 
