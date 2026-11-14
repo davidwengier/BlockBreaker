@@ -345,19 +345,20 @@
       assert(ball.vx === 0 && ball.vy < 0, 'Normal paddle bounce did not return');
     });
 
-    test('Bottom wall persists through a new level and launches the ball from the bottom', () => {
+    test('Starting a new level removes the bottom wall and restores the normal paddle', () => {
       applyPowerup('floor', ball);
       for (const block of blocks) block.hits = 0;
       launched = true;
       update(0);
       update(CONTINUE_DELAY);
       launch();
-      assert(level === 2 && paddleEffect === 'floor' && balls[0].y === H - BALL_R && !launched,
-        'New level did not keep the bottom wall and position the ball on it');
+      assert(level === 2 && paddleEffect === null && paddleWidth() === PADDLE_W &&
+        balls[0].y === paddle.y - BALL_R && !launched && lastPickup === null,
+        'New level did not remove the bottom wall and position the ball on the normal paddle');
       pickups = [];
       launch();
       update(0.05);
-      assert(balls[0].vy < 0 && balls[0].y < H - BALL_R, 'Ball could not launch from the bottom wall');
+      assert(balls[0].vy < 0 && balls[0].y < paddle.y - BALL_R, 'Ball could not launch from the restored paddle');
     });
 
     test('Small ball affects only the collecting ball and uses its smaller collision radius', () => {
@@ -443,7 +444,7 @@
       assert(celebration.levelScore === score - 50, 'Level score included earlier levels');
     });
 
-    test('Powerups last through new levels until the next pickup or a lost life', () => {
+    test('Powerups last until replaced, a life is lost, or a new level starts', () => {
       blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 2)];
       applyPowerup('wide', ball);
       Object.assign(ball, { x: 320, y: 200, vx: 0, vy: 0 });
@@ -454,7 +455,8 @@
       update(0);
       update(CONTINUE_DELAY);
       launch();
-      assert(level === 2 && paddleEffect === 'wide', 'Powerup ended on a new level');
+      assert(level === 2 && paddleEffect === null && paddleWidth() === PADDLE_W && lastPickup === null,
+        'Paddle powerup survived a new level');
       pickups = [{ x: balls[0].x, y: balls[0].y, type: 'shrink' }];
       collectPowerups(balls[0]);
       assert(paddleEffect === 'shrink' && lastPickup === 'shrink', 'Next pickup did not replace the powerup');
@@ -464,12 +466,16 @@
       assert(lives === 2 && paddleEffect === null && lastPickup === null && paddleWidth() === PADDLE_W,
         'Powerup survived a lost life');
       applyPowerup('giant', balls[0]);
+      applyPowerup('multi', balls[0]);
       blocks.forEach(block => { block.hits = 0; });
       launched = true;
       update(0);
       update(CONTINUE_DELAY);
       launch();
-      assert(level === 3 && balls[0].effect === 'giant', 'Ball effect ended on a new level');
+      assert(level === 3 && balls.length === 1 && balls[0].effect === null &&
+        ballRadius(balls[0]) === BALL_R && balls[0].color === null && lastPickup === null,
+        'New level kept a ball powerup or extra balls');
+      applyPowerup('fast', balls[0]);
       newGame();
       assert(paddleEffect === null && balls[0].effect === null && lastPickup === null, 'New game kept the old powerup');
     });

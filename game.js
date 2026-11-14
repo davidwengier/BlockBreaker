@@ -33,7 +33,7 @@ const BALL_SPEED = 320; // px/sec
 
 // Floating pickups apply an effect without a bounce. Ball effects belong to the ball that
 // collected them, while paddle effects are shared; collecting either kind cancels the other.
-// Effects last until replaced or a life is lost. Multi-ball and the heart aren't effects:
+// Effects last until replaced, a life is lost, or a new level starts. Multi-ball and the heart aren't effects:
 // they just add a (plain, red) ball or a life.
 const POWERUPS_PER_LEVEL = 3;
 const POWERUP_REFILL_SECONDS = 10; // how often a missing pickup is replaced during play
@@ -376,11 +376,9 @@ function newGame() {
 // Level-complete celebration: rockets rise from the bottom and burst into falling sparks.
 function completeLevel() {
   state = 'cleared';
-  // Effects carry into the next level; with several balls, the new ball keeps one ball effect.
-  const ballEffect = balls.find(ball => ball.effect)?.effect ?? null;
   balls = [];
   celebration = {
-    levelScore: score - levelStartScore, ballEffect, time: 0, nextRocket: 0, rockets: [], sparks: [],
+    levelScore: score - levelStartScore, time: 0, nextRocket: 0, rockets: [], sparks: [],
   };
 }
 
@@ -388,10 +386,11 @@ function nextLevel() {
   level++;
   levelStartScore = score;
   state = 'playing';
-  const { ballEffect } = celebration;
   celebration = null;
   buildBlocks();
-  resetBall(ballEffect);
+  setPaddleEffect(null);
+  lastPickup = null;
+  resetBall();
 }
 
 function updateCelebration(dt) {
@@ -429,9 +428,9 @@ function updateCelebration(dt) {
   c.sparks = c.sparks.filter(spark => spark.life > 0);
 }
 
-function resetBall(effect = null) {
+function resetBall() {
   launched = false;
-  balls = [{ x: 0, y: 0, vx: 0, vy: 0, effect, color: null }];
+  balls = [{ x: 0, y: 0, vx: 0, vy: 0, effect: null, color: null }];
   stickBallToPaddle();
 }
 
