@@ -307,34 +307,57 @@
         Math.abs(ball.vx - BALL_SPEED * 0.6) < 0.001, 'Speed pickup changed the trajectory');
     });
 
-    test('Full width paddle catches balls at both edges and ends like other paddle effects', () => {
+    test('Bottom wall reflects every ball without paddle angle changes', () => {
       blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
       applyPowerup('double', ball);
-      pickups = [{ x: 300, y: 350, type: 'full' }];
+      pickups = [{ x: 300, y: 350, type: 'floor' }];
       Object.assign(ball, { x: 300, y: 350, vx: 0, vy: -BALL_SPEED });
       collectPowerups(ball);
-      assert(pickups.length === 0 && paddleEffect === 'full' && ball.effect === null &&
-        paddle.x === 0 && paddleWidth() === W, 'Pickup did not give a full width paddle');
+      assert(pickups.length === 0 && paddleEffect === 'floor' && ball.effect === null,
+        'Pickup did not activate the bottom wall');
 
-      movePaddleTo(W);
-      assert(paddle.x === 0, 'Full width paddle moved outside the board');
-      for (const x of [BALL_R + 1, W - BALL_R - 1]) {
-        Object.assign(ball, { x, y: paddle.y - BALL_R + 1, vx: 0, vy: BALL_SPEED });
-        moveBall(ball, 0);
-        assert(ball.vy < 0, `Full width paddle missed the ball at ${x}`);
+      applyPowerup('multi', ball);
+      for (const current of balls) {
+        for (const x of [40, W / 2, W - 40]) {
+          Object.assign(current, { x, y: paddle.y - BALL_R + 1, vx: 192, vy: 256 });
+          moveBall(current, 0);
+          assert(current.vx === 192 && current.vy === 256, 'Paddle intercepted the ball above the bottom wall');
+          current.y = H - BALL_R + 1;
+          moveBall(current, 0);
+          assert(current.y === H - BALL_R && current.vx === 192 && current.vy === -256,
+            `Bottom wall changed the reflection angle at ${x}`);
+        }
       }
+      launched = true;
+      update(0);
+      assert(lives === 3 && balls.length === 2, 'Bottom wall lost a ball or a life');
 
       pickups = [{ x: ball.x, y: ball.y, type: 'ice' }];
       collectPowerups(ball);
       assert(paddleEffect === null && paddleWidth() === PADDLE_W && ball.effect === 'ice',
-        'Ball pickup did not replace the full width paddle');
+        'Ball pickup did not replace the bottom wall');
 
-      applyPowerup('full', ball);
-      Object.assign(ball, { y: H + BALL_R + 1, vx: 0, vy: BALL_SPEED });
+      Object.assign(ball, { x: 40, y: H - BALL_R + 1, vx: 192, vy: 256 });
+      moveBall(ball, 0);
+      assert(ball.vy === 256, 'Bottom wall still bounced the ball after being replaced');
+      Object.assign(ball, { x: paddle.x + paddleWidth() / 2, y: paddle.y - BALL_R + 1 });
+      moveBall(ball, 0);
+      assert(ball.vx === 0 && ball.vy < 0, 'Normal paddle bounce did not return');
+    });
+
+    test('Bottom wall persists through a new level and launches the ball from the bottom', () => {
+      applyPowerup('floor', ball);
+      for (const block of blocks) block.hits = 0;
       launched = true;
       update(0);
-      assert(lives === 2 && paddleEffect === null && paddleWidth() === PADDLE_W,
-        'Full width paddle survived a lost life');
+      update(CONTINUE_DELAY);
+      launch();
+      assert(level === 2 && paddleEffect === 'floor' && balls[0].y === H - BALL_R && !launched,
+        'New level did not keep the bottom wall and position the ball on it');
+      pickups = [];
+      launch();
+      update(0.05);
+      assert(balls[0].vy < 0 && balls[0].y < H - BALL_R, 'Ball could not launch from the bottom wall');
     });
 
     test('Small ball affects only the collecting ball and uses its smaller collision radius', () => {

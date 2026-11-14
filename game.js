@@ -42,7 +42,7 @@ const POWERUPS = {
   multi:   { color: '#ff5722', label: 'Multi-ball' },
   giant:   { color: '#66bb6a', label: 'Giant ball' },
   wide:    { color: '#ab47bc', label: 'Wide paddle', paddle: true },
-  full:    { color: '#42a5f5', label: 'Full width paddle', paddle: true },
+  floor:   { color: '#42a5f5', label: 'Bottom wall', paddle: true },
   double:  { color: '#ec407a', label: 'Double strength' },
   ice:     { color: '#4dd0e1', label: 'Slow ball' },
   heart:   { color: '#ffd700', label: 'Extra life!' },
@@ -96,7 +96,6 @@ const ballRadius = ball => {
   return BALL_R;
 };
 const paddleWidth = () => {
-  if (paddleEffect === 'full') return W;
   if (paddleEffect === 'wide') return PADDLE_W * 1.6;
   if (paddleEffect === 'shrink') return PADDLE_W * 0.6;
   return PADDLE_W;
@@ -438,7 +437,7 @@ function resetBall(effect = null) {
 
 function stickBallToPaddle() {
   balls[0].x = paddle.x + paddleWidth() / 2;
-  balls[0].y = paddle.y - ballRadius(balls[0]);
+  balls[0].y = (paddleEffect === 'floor' ? H : paddle.y) - ballRadius(balls[0]);
 }
 
 function launch() {
@@ -589,10 +588,14 @@ function moveBall(ball, dt) {
   if (ball.x < r) { ball.x = r; ball.vx = Math.abs(ball.vx); }
   if (ball.x > W - r) { ball.x = W - r; ball.vx = -Math.abs(ball.vx); }
   if (ball.y < r) { ball.y = r; ball.vy = Math.abs(ball.vy); }
+  if (paddleEffect === 'floor' && ball.y > H - r) {
+    ball.y = H - r;
+    ball.vy = -Math.abs(ball.vy);
+  }
 
-  // Paddle: the hit position controls the bounce angle
+  // The bottom wall replaces the paddle, so its position cannot change the bounce angle.
   const pw = paddleWidth();
-  if (ball.vy > 0 &&
+  if (paddleEffect !== 'floor' && ball.vy > 0 &&
       ball.y + r >= paddle.y && ball.y - r <= paddle.y + PADDLE_H &&
       ball.x >= paddle.x - r && ball.x <= paddle.x + pw + r) {
     const hit = (ball.x - (paddle.x + pw / 2)) / (pw / 2); // -1..1
@@ -663,7 +666,11 @@ function draw() {
   ctx.textBaseline = 'alphabetic';
 
   ctx.fillStyle = paddleEffect ? POWERUPS[paddleEffect].color : '#ecf0f1';
-  ctx.fillRect(paddle.x, paddle.y, paddleWidth(), PADDLE_H);
+  if (paddleEffect === 'floor') {
+    ctx.fillRect(0, H - 2, W, 2);
+  } else {
+    ctx.fillRect(paddle.x, paddle.y, paddleWidth(), PADDLE_H);
+  }
 
   for (const ball of balls) {
     ctx.fillStyle = ball.effect ? POWERUPS[ball.effect].color : ball.color ?? '#ecf0f1';
