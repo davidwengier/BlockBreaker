@@ -31,23 +31,24 @@ const PADDLE_SPEED = 480; // px/sec
 const BALL_R = 7;
 const BALL_SPEED = 320; // px/sec
 
-// Floating pickups change the ball's colour and apply an effect without a bounce.
-// Only one is active at a time; it lasts until the next pickup replaces it or a life is lost.
-// The heart is the exception: it just adds a life and leaves the current powerup alone.
+// Floating pickups apply an effect without a bounce. Ball effects belong to the ball that
+// collected them, while paddle effects are shared; collecting either kind cancels the other.
+// Effects last until replaced or a life is lost. Multi-ball and the heart aren't effects:
+// they just add a (plain, red) ball or a life.
 const POWERUPS_PER_LEVEL = 3;
 const POWERUP_REFILL_SECONDS = 10; // how often a missing pickup is replaced during play
 const POWERUP_R = 9;
 const POWERUPS = {
   multi:   { color: '#ff5722', label: 'Multi-ball' },
   giant:   { color: '#66bb6a', label: 'Giant ball' },
-  wide:    { color: '#ab47bc', label: 'Wide paddle' },
+  wide:    { color: '#ab47bc', label: 'Wide paddle', paddle: true },
   double:  { color: '#ec407a', label: 'Double strength' },
   ice:     { color: '#4dd0e1', label: 'Slow ball' },
   heart:   { color: '#ffd700', label: 'Extra life!' },
   // Negative powerups
-  shrink:  { color: '#8d6e63', label: 'Skinny paddle', bad: true },
+  shrink:  { color: '#8d6e63', label: 'Skinny paddle', bad: true, paddle: true },
   fast:    { color: '#d50000', label: 'Fast ball', bad: true },
-  reverse: { color: '#aeea00', label: 'Reversed controls', bad: true },
+  reverse: { color: '#aeea00', label: 'Reversed controls', bad: true, paddle: true },
   ghost:   { color: '#78909c', label: 'Ghost ball', bad: true },
 };
 
@@ -76,47 +77,66 @@ for (const [type, p] of Object.entries(POWERUPS)) {
   addLegendItem(p.color, p.label, { bad: p.bad, heart: type === 'heart' });
 }
 // Every ball in play; a life is only lost once all of them have fallen off the bottom.
+// Each ball is { x, y, vx, vy, effect, color }: its own powerup type and, for balls split off
+// by multi-ball, a base colour shown while it has no effect.
 let balls = [];
 let launched = false;
 let levelStartScore = 0;
 let refillTimer = 0; // seconds of play since the last pickup refill check
 let celebration = null; // fireworks and score summary while state is 'cleared'
 let blocks, pickups, score, lives, level, state; // state: 'playing' | 'cleared' | 'lost'
-let active = null; // { type } for the current powerup
+let paddleEffect = null; // type of the shared paddle powerup, if any
+let lastPickup = null; // type of the most recent pickup, shown in the corner
 const keys = {};
 
-const ballRadius = () => (active?.type === 'giant' ? BALL_R * 2 : BALL_R);
+const ballRadius = ball => (ball?.effect === 'giant' ? BALL_R * 2 : BALL_R);
 const paddleWidth = () => {
-  if (active?.type === 'wide') return PADDLE_W * 1.6;
-  if (active?.type === 'shrink') return PADDLE_W * 0.6;
+  if (paddleEffect === 'wide') return PADDLE_W * 1.6;
+  if (paddleEffect === 'shrink') return PADDLE_W * 0.6;
   return PADDLE_W;
 };
-const reversed = () => active?.type === 'reverse';
+const reversed = () => paddleEffect === 'reverse';
 
-function ballSpeed() {
+function ballSpeed(ball) {
   const base = BALL_SPEED * (1 + SPEED_STEP * (level - 1));
-  if (active?.type === 'ice') return base * 0.6;
-  if (active?.type === 'fast') return base * 1.5;
+  if (ball?.effect === 'ice') return base * 0.6;
+  if (ball?.effect === 'fast') return base * 1.5;
   return base;
 }
 
-// Keep each ball's direction but apply the current speed (after powerups start/end)
-function applySpeed() {
-  for (const ball of balls) {
-    const current = Math.hypot(ball.vx, ball.vy);
-    if (current === 0) continue;
-    const k = ballSpeed() / current;
-    ball.vx *= k;
-    ball.vy *= k;
-  }
+// Keep the ball's direction but apply its current speed (after its effect starts/ends)
+function applySpeed(ball) {
+  const current = Math.hypot(ball.vx, ball.vy);
+  if (current === 0) return;
+  const k = ballSpeed(ball) / current;
+  ball.vx *= k;
+  ball.vy *= k;
 }
 
-function setPowerup(type) {
+function setPaddleEffect(type) {
   const centre = paddle.x + paddleWidth() / 2;
-  active = type ? { type } : null;
+  paddleEffect = type;
   // Widen/narrow around the centre so the paddle doesn't jump
   paddle.x = Math.max(0, Math.min(W - paddleWidth(), centre - paddleWidth() / 2));
-  applySpeed();
+}
+
+function setBallEffect(ball, type) {
+  ball.effect = type;
+  applySpeed(ball);
+}
+
+// Apply a collected pickup (other than a heart) on behalf of the ball that touched it.
+function applyPowerup(type, ball) {
+  lastPickup = type;
+  if (type === 'multi') {
+    spawnBall(ball);
+  } else if (POWERUPS[type].paddle) {
+    for (const b of balls) setBallEffect(b, null);
+    setPaddleEffect(type);
+  } else {
+    setPaddleEffect(null);
+    setBallEffect(ball, type);
+  }
 }
 
 function blockColor(hits) {
@@ -268,7 +288,7 @@ function canPlacePickup(x, y, spaced = true) {
     if (blocks.some(b => b.hits > 0 && blockContact(b, probe.y === y ? radius : BALL_R, probe))) return false;
   }
   if (!spaced) return true;
-  const crowded = item => Math.hypot(item.x - x, item.y - y) < POWERUP_R * 4 + ballRadius();
+  const crowded = item => Math.hypot(item.x - x, item.y - y) < POWERUP_R * 4 + ballRadius(item);
   return !pickups.some(crowded) && !balls.some(crowded);
 }
 
@@ -310,7 +330,7 @@ function damageBlock(b, damage = 1) {
   score += 10;
 }
 
-// Split a new ball off the collecting one, turned 45° but kept heading mostly up or down.
+// Split a plain red ball off the collecting one, turned 45° but kept heading mostly up or down.
 function spawnBall(from) {
   let angle = Math.PI / 4;
   const turned = a => ({
@@ -319,20 +339,21 @@ function spawnBall(from) {
   });
   let velocity = turned(angle);
   if (Math.abs(velocity.vy) < Math.abs(velocity.vx)) velocity = turned(-angle);
-  balls.push({ x: from.x, y: from.y, ...velocity });
+  const ball = { x: from.x, y: from.y, ...velocity, effect: null, color: POWERUPS.multi.color };
+  applySpeed(ball); // plain speed, even if the collecting ball is slowed or sped up
+  balls.push(ball);
 }
 
 function collectPowerups(ball) {
   for (let i = pickups.length - 1; i >= 0; i--) {
     const pickup = pickups[i];
-    if (Math.hypot(ball.x - pickup.x, ball.y - pickup.y) > ballRadius() + POWERUP_R) continue;
+    if (Math.hypot(ball.x - pickup.x, ball.y - pickup.y) > ballRadius(ball) + POWERUP_R) continue;
     pickups.splice(i, 1);
     if (pickup.type === 'heart') {
       lives++;
       continue;
     }
-    setPowerup(pickup.type);
-    if (pickup.type === 'multi') spawnBall(ball);
+    applyPowerup(pickup.type, ball);
   }
 }
 
@@ -344,24 +365,30 @@ function newGame() {
   state = 'playing';
   celebration = null;
   buildBlocks();
-  setPowerup(null);
+  setPaddleEffect(null);
+  lastPickup = null;
   resetBall();
 }
 
 // Level-complete celebration: rockets rise from the bottom and burst into falling sparks.
 function completeLevel() {
   state = 'cleared';
+  // Effects carry into the next level; with several balls, the new ball keeps one ball effect.
+  const ballEffect = balls.find(ball => ball.effect)?.effect ?? null;
   balls = [];
-  celebration = { levelScore: score - levelStartScore, time: 0, nextRocket: 0, rockets: [], sparks: [] };
+  celebration = {
+    levelScore: score - levelStartScore, ballEffect, time: 0, nextRocket: 0, rockets: [], sparks: [],
+  };
 }
 
 function nextLevel() {
   level++;
   levelStartScore = score;
   state = 'playing';
+  const { ballEffect } = celebration;
   celebration = null;
   buildBlocks();
-  resetBall();
+  resetBall(ballEffect);
 }
 
 function updateCelebration(dt) {
@@ -399,15 +426,15 @@ function updateCelebration(dt) {
   c.sparks = c.sparks.filter(spark => spark.life > 0);
 }
 
-function resetBall() {
+function resetBall(effect = null) {
   launched = false;
-  balls = [{ x: 0, y: 0, vx: 0, vy: 0 }];
+  balls = [{ x: 0, y: 0, vx: 0, vy: 0, effect, color: null }];
   stickBallToPaddle();
 }
 
 function stickBallToPaddle() {
   balls[0].x = paddle.x + paddleWidth() / 2;
-  balls[0].y = paddle.y - ballRadius();
+  balls[0].y = paddle.y - ballRadius(balls[0]);
 }
 
 function launch() {
@@ -424,8 +451,8 @@ function launch() {
   launched = true;
   // Slight random angle, always upward
   const angle = (-Math.PI / 2) + (Math.random() - 0.5) * 0.8;
-  balls[0].vx = Math.cos(angle) * ballSpeed();
-  balls[0].vy = Math.sin(angle) * ballSpeed();
+  balls[0].vx = Math.cos(angle) * ballSpeed(balls[0]);
+  balls[0].vy = Math.sin(angle) * ballSpeed(balls[0]);
 }
 
 function movePaddleTo(x) {
@@ -488,7 +515,7 @@ function update(dt) {
     // Copy the list so a ball split off mid-step starts moving on the next step.
     for (const ball of [...balls]) moveBall(ball, dt / steps);
   }
-  balls = balls.filter(ball => ball.y - ballRadius() <= H);
+  balls = balls.filter(ball => ball.y - ballRadius(ball) <= H);
 
   // Every few seconds of play, top the board back up to its usual number of pickups.
   if ((refillTimer += dt) >= POWERUP_REFILL_SECONDS) {
@@ -500,7 +527,9 @@ function update(dt) {
     completeLevel();
   } else if (balls.length === 0) {
     lives--;
-    setPowerup(null); // the new ball starts without the old powerup
+    // The new ball starts plain, and the paddle goes back to normal
+    setPaddleEffect(null);
+    lastPickup = null;
     if (lives <= 0) state = 'lost';
     else resetBall();
   }
@@ -551,7 +580,7 @@ function moveBall(ball, dt) {
   ball.x += ball.vx * dt;
   ball.y += ball.vy * dt;
   collectPowerups(ball);
-  const r = ballRadius();
+  const r = ballRadius(ball);
 
   // Walls and ceiling
   if (ball.x < r) { ball.x = r; ball.vx = Math.abs(ball.vx); }
@@ -565,8 +594,8 @@ function moveBall(ball, dt) {
       ball.x >= paddle.x - r && ball.x <= paddle.x + pw + r) {
     const hit = (ball.x - (paddle.x + pw / 2)) / (pw / 2); // -1..1
     const angle = hit * (Math.PI / 3); // up to 60° from vertical
-    ball.vx = Math.sin(angle) * ballSpeed();
-    ball.vy = -Math.cos(angle) * ballSpeed();
+    ball.vx = Math.sin(angle) * ballSpeed(ball);
+    ball.vy = -Math.cos(angle) * ballSpeed(ball);
     ball.y = paddle.y - r;
   }
 
@@ -580,7 +609,7 @@ function moveBall(ball, dt) {
     ball.y += contact.ny * (contact.depth + 0.01);
     if (incoming >= 0) continue;
 
-    damageBlock(b, active?.type === 'double' ? 2 : 1);
+    damageBlock(b, ball.effect === 'double' ? 2 : 1);
 
     // Reflect around the actual surface normal, including curved and inside corners.
     const dot = ball.vx * contact.nx + ball.vy * contact.ny;
@@ -630,14 +659,14 @@ function draw() {
   }
   ctx.textBaseline = 'alphabetic';
 
-  ctx.fillStyle = active?.type === 'wide' ? POWERUPS.wide.color : '#ecf0f1';
+  ctx.fillStyle = paddleEffect ? POWERUPS[paddleEffect].color : '#ecf0f1';
   ctx.fillRect(paddle.x, paddle.y, paddleWidth(), PADDLE_H);
 
-  ctx.fillStyle = active ? POWERUPS[active.type].color : '#ecf0f1';
-  ctx.globalAlpha = active?.type === 'ghost' ? 0.15 : 1;
   for (const ball of balls) {
+    ctx.fillStyle = ball.effect ? POWERUPS[ball.effect].color : ball.color ?? '#ecf0f1';
+    ctx.globalAlpha = ball.effect === 'ghost' ? 0.15 : 1;
     ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ballRadius(), 0, Math.PI * 2);
+    ctx.arc(ball.x, ball.y, ballRadius(ball), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
@@ -651,9 +680,9 @@ function draw() {
   ctx.textAlign = 'right';
   ctx.fillText(`Lives: ${lives}`, W - 10, 24);
 
-  if (active) {
-    ctx.fillStyle = POWERUPS[active.type].color;
-    ctx.fillText(POWERUPS[active.type].label, W - 10, H - 6);
+  if (lastPickup) {
+    ctx.fillStyle = POWERUPS[lastPickup].color;
+    ctx.fillText(POWERUPS[lastPickup].label, W - 10, H - 6);
   }
 
   ctx.fillStyle = '#ecf0f1';

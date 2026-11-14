@@ -102,7 +102,7 @@
       assert(blockColor(1) === blockColor(5), 'First health band is inconsistent');
       assert(blockColor(31) === blockColor(1), 'Colours do not cycle after the last band');
       damageBlock(b, 100);
-      assert(b.hits === 0 && lives === 3 && score === 10 && active === null, 'Destruction awarded a hidden powerup');
+      assert(b.hits === 0 && lives === 3 && score === 10 && lastPickup === null, 'Destruction awarded a hidden powerup');
       damageBlock(b);
       assert(b.hits === 0 && lives === 3 && score === 10, 'Destroyed block rewarded twice');
     });
@@ -110,8 +110,8 @@
     test('Double strength removes two hits per impact and still bounces', () => {
       const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 20, 5);
       blocks = [b];
-      setPowerup('double');
-      Object.assign(ball, { x: 94, y: 80, vx: ballSpeed(), vy: 0 });
+      applyPowerup('double', ball);
+      Object.assign(ball, { x: 94, y: 80, vx: ballSpeed(ball), vy: 0 });
       moveBall(ball, 0);
       assert(b.hits === 3 && ball.vx < 0, 'Double strength did not deal two damage and bounce');
       assert(!('fire' in POWERUPS) && !('bomb' in POWERUPS), 'Old fireball or bomb powerups remain');
@@ -120,12 +120,12 @@
     test('Multi-ball splits off at an angle and lives are lost only when every ball is gone', () => {
       blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
       pickups = [{ x: 300, y: 300, type: 'multi' }];
-      Object.assign(ball, { x: 300, y: 310, vx: 0, vy: -ballSpeed() });
+      Object.assign(ball, { x: 300, y: 310, vx: 0, vy: -ballSpeed(ball) });
       launched = true;
       moveBall(ball, 0);
       assert(balls.length === 2 && pickups.length === 0, 'Multi-ball did not add a second ball');
       const extra = balls[1];
-      assert(Math.abs(Math.hypot(extra.vx, extra.vy) - ballSpeed()) < 0.001, 'New ball has the wrong speed');
+      assert(Math.abs(Math.hypot(extra.vx, extra.vy) - ballSpeed(ball)) < 0.001, 'New ball has the wrong speed');
       assert(extra.vx !== 0 && extra.vy < 0, 'New ball did not split off at an upward angle');
 
       ball.y = H + BALL_R * 3;
@@ -147,8 +147,8 @@
 
       const largeTarget = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3);
       blocks = [largeTarget];
-      setPowerup('giant');
-      Object.assign(ball, { x: 87, y: 95, vx: ballSpeed(), vy: 0 });
+      applyPowerup('giant', ball);
+      Object.assign(ball, { x: 87, y: 95, vx: ballSpeed(ball), vy: 0 });
       moveBall(ball, 0);
       assert(largeTarget.hits === 2 && ball.vx < 0, 'Giant ball did not collide using its larger radius');
     });
@@ -285,12 +285,12 @@
 
     test('Floating pickups activate on touch without bouncing and are collected once', () => {
       blocks = [];
-      setPowerup('wide');
+      applyPowerup('wide', ball);
       pickups = [{ x: 200, y: 350, type: 'heart' }];
       Object.assign(ball, { x: 190, y: 350, vx: BALL_SPEED, vy: 0 });
       moveBall(ball, 0.01);
       assert(pickups.length === 0 && lives === 4, 'Heart did not add a life and disappear');
-      assert(active?.type === 'wide' && paddleWidth() === PADDLE_W * 1.6,
+      assert(paddleEffect === 'wide' && paddleWidth() === PADDLE_W * 1.6,
         'Heart replaced or cleared the current powerup');
       assert(Math.abs(ball.x - 193.2) < 0.001 && ball.y === 350 &&
         ball.vx === BALL_SPEED && ball.vy === 0, 'Pickup moved or bounced the ball');
@@ -299,10 +299,10 @@
 
       pickups = [{ x: 240, y: 350, type: 'ice' }];
       moveBall(ball, 0);
-      assert(pickups.length === 1 && active.type === 'wide', 'Distant pickup activated');
+      assert(pickups.length === 1 && paddleEffect === 'wide', 'Distant pickup activated');
       ball.x = 224;
       moveBall(ball, 0);
-      assert(pickups.length === 0 && active.type === 'ice', 'Edge contact did not collect the pickup');
+      assert(pickups.length === 0 && ball.effect === 'ice' && paddleEffect === null, 'Edge contact did not collect the pickup');
       assert(ball.x === 224 && ball.vx > 0 && ball.vy === 0 &&
         Math.abs(ball.vx - BALL_SPEED * 0.6) < 0.001, 'Speed pickup changed the trajectory');
     });
@@ -316,8 +316,8 @@
       assert(pickups.length === 0 && lives === 4 && ball.vx > 0 && ball.vy === 0, 'Fast ball skipped the pickup');
 
       pickups = [{ x: 322, y: 350, type: 'heart' }];
-      setPowerup('giant');
-      Object.assign(ball, { x: 300, y: 350, vx: ballSpeed(), vy: 0 });
+      applyPowerup('giant', ball);
+      Object.assign(ball, { x: 300, y: 350, vx: ballSpeed(ball), vy: 0 });
       moveBall(ball, 0);
       assert(pickups.length === 0 && lives === 5 && ball.vx > 0, 'Giant pickup contact ignored the larger radius');
     });
@@ -369,26 +369,57 @@
 
     test('Powerups last through new levels until the next pickup or a lost life', () => {
       blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 2)];
-      setPowerup('wide');
+      applyPowerup('wide', ball);
       Object.assign(ball, { x: 320, y: 200, vx: 0, vy: 0 });
       launched = true;
       for (let i = 0; i < 1200; i++) update(0.05); // a full minute
-      assert(active?.type === 'wide', 'Powerup expired over time');
+      assert(paddleEffect === 'wide', 'Powerup expired over time');
       blocks[0].hits = 0;
       update(0);
       update(CONTINUE_DELAY);
       launch();
-      assert(level === 2 && active?.type === 'wide', 'Powerup ended on a new level');
+      assert(level === 2 && paddleEffect === 'wide', 'Powerup ended on a new level');
       pickups = [{ x: balls[0].x, y: balls[0].y, type: 'shrink' }];
       collectPowerups(balls[0]);
-      assert(active?.type === 'shrink', 'Next pickup did not replace the powerup');
+      assert(paddleEffect === 'shrink' && lastPickup === 'shrink', 'Next pickup did not replace the powerup');
       launched = true;
       balls[0].y = H + BALL_R * 3;
       update(0);
-      assert(lives === 2 && active === null && paddleWidth() === PADDLE_W, 'Powerup survived a lost life');
-      setPowerup('giant');
+      assert(lives === 2 && paddleEffect === null && lastPickup === null && paddleWidth() === PADDLE_W,
+        'Powerup survived a lost life');
+      applyPowerup('giant', balls[0]);
+      blocks.forEach(block => { block.hits = 0; });
+      launched = true;
+      update(0);
+      update(CONTINUE_DELAY);
+      launch();
+      assert(level === 3 && balls[0].effect === 'giant', 'Ball effect ended on a new level');
       newGame();
-      assert(active === null, 'New game kept the old powerup');
+      assert(paddleEffect === null && balls[0].effect === null && lastPickup === null, 'New game kept the old powerup');
+    });
+
+    test('Ball effects belong to one ball; paddle and ball effects cancel each other', () => {
+      blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 9)];
+      Object.assign(ball, { x: 300, y: 300, vx: 0, vy: -ballSpeed(ball) });
+      launched = true;
+      applyPowerup('double', ball);
+      applyPowerup('multi', ball);
+      const extra = balls[1];
+      assert(ball.effect === 'double' && extra.effect === null && extra.color === POWERUPS.multi.color,
+        'New ball was not plain and red');
+      assert(lastPickup === 'multi', 'Label does not show the last pickup');
+
+      applyPowerup('fast', extra);
+      assert(ball.effect === 'double' && extra.effect === 'fast', 'Ball effect spread to the other ball');
+      assert(Math.abs(Math.hypot(extra.vx, extra.vy) - ballSpeed(null) * 1.5) < 0.001 &&
+        Math.abs(Math.hypot(ball.vx, ball.vy) - ballSpeed(null)) < 0.001, 'Speeds were not per ball');
+
+      applyPowerup('wide', ball);
+      assert(paddleEffect === 'wide' && ball.effect === null && extra.effect === null, 'Paddle effect kept ball effects');
+      assert(Math.abs(Math.hypot(extra.vx, extra.vy) - ballSpeed(null)) < 0.001, 'Cleared effect kept its speed');
+      applyPowerup('giant', extra);
+      assert(paddleEffect === null && paddleWidth() === PADDLE_W && extra.effect === 'giant' && ball.effect === null,
+        'Ball effect did not cancel the paddle effect');
     });
 
     results.textContent += `\n${passed} passed, ${failures} failed`;
