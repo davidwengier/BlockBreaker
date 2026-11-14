@@ -248,6 +248,33 @@
       for (let r = 0; r < ROWS; r++) assert(rows.has(r), `No pickup spawned in row ${r}`);
     });
 
+    test('Missing pickups are refilled every 10 seconds at reachable random spots', () => {
+      pickups = [];
+      Object.assign(ball, { x: 20, y: paddle.y - 20, vx: 0, vy: 0 }); // parked out of the way
+      launched = true;
+      update(POWERUP_REFILL_SECONDS - 0.1);
+      assert(pickups.length === 0, 'Pickup refilled too early');
+      update(0.1);
+      assert(pickups.length === 1, 'No pickup after 10 seconds');
+      update(POWERUP_REFILL_SECONDS);
+      update(POWERUP_REFILL_SECONDS);
+      assert(pickups.length === POWERUPS_PER_LEVEL, 'Refill did not top up to three');
+      update(POWERUP_REFILL_SECONDS);
+      assert(pickups.length === POWERUPS_PER_LEVEL, 'Refill added more than three pickups');
+
+      for (let i = 0; i < 100; i++) {
+        pickups = [];
+        assert(spawnPickup(), 'Could not find a spot for a pickup');
+        const pickup = pickups[0];
+        assert(pickup.type in POWERUPS, 'Unknown pickup type');
+        for (let y = pickup.y; y < paddle.y - BALL_R * 4; y += 2) {
+          for (const b of blocks) {
+            assert(!ctx.isPointInPath(b.path, pickup.x, y), 'Pickup is inside or blocked by a block');
+          }
+        }
+      }
+    });
+
     test('Floating pickups activate on touch without bouncing and are collected once', () => {
       blocks = [];
       pickups = [{ x: 200, y: 350, type: 'heart' }];
