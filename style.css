@@ -34,10 +34,6 @@ body {
   color: #ff8a80;
 }
 
-#legend .dot.square {
-  border-radius: 0;
-}
-
 #legend .heart {
   width: 14px;
   font-size: 16px;

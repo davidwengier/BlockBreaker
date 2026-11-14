@@ -55,7 +55,8 @@ const paddle = { x: (W - PADDLE_W) / 2, y: H - 30 };
 
 // Fill the side legend from the powerup table so the two never drift apart
 const legend = document.getElementById('legend');
-function addLegendItem(color, text, { bad = false, square = false, heart = false } = {}) {
+// Good powerups are filled circles and bad ones are hollow, so they're easy to tell apart.
+function addLegendItem(color, text, { bad = false, heart = false } = {}) {
   const li = document.createElement('li');
   const dot = document.createElement('span');
   if (heart) {
@@ -63,17 +64,13 @@ function addLegendItem(color, text, { bad = false, square = false, heart = false
     dot.textContent = '♥';
     dot.style.color = color;
   } else {
-    dot.className = square ? 'dot square' : 'dot';
-    dot.style.background = square ? color : 'transparent';
+    dot.className = 'dot';
+    dot.style.background = bad ? 'transparent' : color;
     dot.style.borderColor = color;
   }
   if (bad) li.className = 'bad';
   li.append(dot, text);
   legend.append(li);
-}
-for (let i = 0; i < BLOCK_COLORS.length; i++) {
-  const max = (i + 1) * HITS_PER_COLOR;
-  addLegendItem(blockColor(max), `${max - HITS_PER_COLOR + 1}-${max} hits`, { square: true });
 }
 for (const [type, p] of Object.entries(POWERUPS)) {
   addLegendItem(p.color, p.label, { bad: p.bad, heart: type === 'heart' });
@@ -626,7 +623,11 @@ function draw() {
     ctx.beginPath();
     ctx.arc(pickup.x, pickup.y, POWERUP_R, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = powerup.color;
+    if (!powerup.bad) {
+      ctx.fillStyle = powerup.color;
+      ctx.fill();
+    }
+    ctx.fillStyle = powerup.bad ? powerup.color : '#17212b';
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
