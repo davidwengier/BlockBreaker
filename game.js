@@ -254,26 +254,47 @@ function randomPowerupType() {
 }
 
 // Is there room for a pickup here, with a straight run up from below so a ball can reach it?
-function canPlacePickup(x, y) {
+// Spacing from other pickups and balls is preferred but can be dropped when the board is busy.
+function canPlacePickup(x, y, spaced = true) {
   const probe = { x, y };
   const radius = POWERUP_R + BALL_R;
   for (; probe.y < paddle.y - BALL_R * 4; probe.y += BALL_R) {
     if (blocks.some(b => b.hits > 0 && blockContact(b, probe.y === y ? radius : BALL_R, probe))) return false;
   }
+  if (!spaced) return true;
   const crowded = item => Math.hypot(item.x - x, item.y - y) < POWERUP_R * 4 + ballRadius();
   return !pickups.some(crowded) && !balls.some(crowded);
 }
 
-// Add one pickup at a random reachable spot; gives up quietly if the board has no room.
+// Add one pickup at a random reachable spot. Random tries are fast; if they all miss, scan the
+// whole board so a free spot is never overlooked, relaxing spacing only as a last resort.
 function spawnPickup() {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const x = POWERUP_R * 2 + Math.random() * (W - POWERUP_R * 4);
-    const y = BLOCK_TOP + POWERUP_R + Math.random() * (paddle.y - 100 - BLOCK_TOP);
-    if (!canPlacePickup(x, y)) continue;
+  const minX = POWERUP_R * 2;
+  const maxX = W - POWERUP_R * 2;
+  const minY = BLOCK_TOP + POWERUP_R;
+  const maxY = paddle.y - 100;
+  const place = (x, y) => {
     pickups.push({ x, y, type: randomPowerupType() });
     return true;
+  };
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const x = minX + Math.random() * (maxX - minX);
+    const y = minY + Math.random() * (maxY - minY);
+    if (canPlacePickup(x, y)) return place(x, y);
   }
-  return false;
+  for (const spaced of [true, false]) {
+    const spots = [];
+    for (let y = minY; y <= maxY; y += POWERUP_R) {
+      for (let x = minX; x <= maxX; x += POWERUP_R) {
+        if (canPlacePickup(x, y, spaced)) spots.push({ x, y });
+      }
+    }
+    if (spots.length) {
+      const spot = spots[Math.floor(Math.random() * spots.length)];
+      return place(spot.x, spot.y);
+    }
+  }
+  return false; // only possible if blocks cover every column all the way down
 }
 
 function damageBlock(b, damage = 1) {

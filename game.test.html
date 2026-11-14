@@ -273,6 +273,14 @@
           }
         }
       }
+
+      // Balls crowding every spot used to make the refill give up silently.
+      pickups = [];
+      balls = [];
+      for (let y = 0; y < H; y += 20) {
+        for (let x = 0; x < W; x += 20) balls.push({ x, y, vx: 0, vy: 0 });
+      }
+      assert(spawnPickup() && pickups.length === 1, 'Busy board did not get a pickup');
     });
 
     test('Floating pickups activate on touch without bouncing and are collected once', () => {
