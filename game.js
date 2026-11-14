@@ -12,6 +12,8 @@ const THROUGH_PATHS = 2;
 const HITS_PER_LEVEL = 6;
 const SHRINK_AFTER_LEVEL = 5; // later levels use more, smaller shapes
 const SPEED_STEP = 0.1; // ball speed increase per level
+const CONTINUE_DELAY = 0.75; // seconds before the level-complete screen accepts input
+const FIREWORK_COLORS = ['#ff5252', '#ffd740', '#69f0ae', '#40c4ff', '#e040fb', '#ffffff'];
 const HITS_PER_COLOR = 5; // each colour covers this many hits, cycling after the last
 const BLOCK_COLORS = ['#9ccc65', '#ffee58', '#ffb74d', '#ef5350', '#ba68c8', '#64b5f6'];
 // Clockwise outlines in cell units; the label stays inside a solid part after rotation.
@@ -69,7 +71,9 @@ for (const p of Object.values(POWERUPS)) addLegendItem(p.color, p.label, { bad: 
 // Every ball in play; a life is only lost once all of them have fallen off the bottom.
 let balls = [];
 let launched = false;
-let blocks, pickups, score, lives, level, state; // state: 'playing' | 'lost'
+let levelStartScore = 0;
+let celebration = null; // fireworks and score summary while state is 'cleared'
+let blocks, pickups, score, lives, level, state; // state: 'playing' | 'cleared' | 'lost'
 let active = null; // { type } for the current powerup
 const keys = {};
 
@@ -274,12 +278,65 @@ function collectPowerups(ball) {
 
 function newGame() {
   score = 0;
+  levelStartScore = 0;
   lives = 3;
   level = 1;
   state = 'playing';
+  celebration = null;
   buildBlocks();
   setPowerup(null);
   resetBall();
+}
+
+// Level-complete celebration: rockets rise from the bottom and burst into falling sparks.
+function completeLevel() {
+  state = 'cleared';
+  balls = [];
+  celebration = { levelScore: score - levelStartScore, time: 0, nextRocket: 0, rockets: [], sparks: [] };
+}
+
+function nextLevel() {
+  level++;
+  levelStartScore = score;
+  state = 'playing';
+  celebration = null;
+  buildBlocks();
+  resetBall();
+}
+
+function updateCelebration(dt) {
+  const c = celebration;
+  c.time += dt;
+  if ((c.nextRocket -= dt) <= 0) {
+    c.nextRocket = 0.25 + Math.random() * 0.35;
+    c.rockets.push({
+      x: W * (0.15 + Math.random() * 0.7), y: H,
+      vy: -(380 + Math.random() * 120),
+      burstY: H * (0.15 + Math.random() * 0.35),
+      color: FIREWORK_COLORS[Math.floor(Math.random() * FIREWORK_COLORS.length)],
+    });
+  }
+  for (const rocket of c.rockets) {
+    rocket.y += rocket.vy * dt;
+    if (rocket.y > rocket.burstY) continue;
+    for (let i = 0; i < 60; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 60 + Math.random() * 160;
+      const life = 1 + Math.random() * 0.6;
+      c.sparks.push({
+        x: rocket.x, y: rocket.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        life, maxLife: life, color: rocket.color,
+      });
+    }
+  }
+  c.rockets = c.rockets.filter(rocket => rocket.y > rocket.burstY);
+  for (const spark of c.sparks) {
+    spark.vy += 160 * dt; // gravity
+    spark.x += spark.vx * dt;
+    spark.y += spark.vy * dt;
+    spark.life -= dt;
+  }
+  c.sparks = c.sparks.filter(spark => spark.life > 0);
 }
 
 function resetBall() {
@@ -294,6 +351,11 @@ function stickBallToPaddle() {
 }
 
 function launch() {
+  if (state === 'cleared') {
+    // A short pause stops a click or Space press at the moment of clearing from skipping the screen.
+    if (celebration.time >= CONTINUE_DELAY) nextLevel();
+    return;
+  }
   if (state !== 'playing') {
     newGame();
     return;
@@ -345,6 +407,10 @@ canvas.addEventListener('pointerdown', e => {
 });
 
 function update(dt) {
+  if (state === 'cleared') {
+    updateCelebration(dt);
+    return;
+  }
   if (state !== 'playing') return;
 
   const dir = ((keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0)) * (reversed() ? -1 : 1);
@@ -365,9 +431,7 @@ function update(dt) {
   balls = balls.filter(ball => ball.y - ballRadius() <= H);
 
   if (blocks.every(b => b.hits === 0)) {
-    level++;
-    buildBlocks();
-    resetBall();
+    completeLevel();
   } else if (balls.length === 0) {
     lives--;
     if (lives <= 0) state = 'lost';
@@ -515,13 +579,47 @@ function draw() {
 
   ctx.fillStyle = '#ecf0f1';
   ctx.textAlign = 'center';
-  if (state === 'playing' && !launched) {
+  if (state === 'cleared') {
+    drawCelebration();
+  } else if (state === 'playing' && !launched) {
     ctx.fillText('Press Space or click to launch', W / 2, paddle.y - 60);
   } else if (state !== 'playing') {
     ctx.font = '32px sans-serif';
     ctx.fillText('Game over', W / 2, H / 2);
     ctx.font = '16px sans-serif';
     ctx.fillText('Press Space or click to play again', W / 2, H / 2 + 30);
+  }
+}
+
+function drawCelebration() {
+  const c = celebration;
+  ctx.fillStyle = 'rgba(10, 12, 24, 0.55)';
+  ctx.fillRect(0, 0, W, H);
+
+  for (const rocket of c.rockets) {
+    ctx.fillStyle = rocket.color;
+    ctx.fillRect(rocket.x - 1.5, rocket.y, 3, 10);
+  }
+  for (const spark of c.sparks) {
+    ctx.globalAlpha = spark.life / spark.maxLife;
+    ctx.fillStyle = spark.color;
+    ctx.beginPath();
+    ctx.arc(spark.x, spark.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = '#ffd700';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 36px sans-serif';
+  ctx.fillText(`Level ${level} complete!`, W / 2, H / 2 - 30);
+  ctx.fillStyle = '#ecf0f1';
+  ctx.font = '20px sans-serif';
+  ctx.fillText(`This level: +${c.levelScore}`, W / 2, H / 2 + 10);
+  ctx.fillText(`Total score: ${score}`, W / 2, H / 2 + 40);
+  if (c.time >= CONTINUE_DELAY) {
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`Press Space or click for level ${level + 1}`, W / 2, H / 2 + 85);
   }
 }
 
