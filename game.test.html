@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Block Breaker tests</title>
+</head>
+<body>
+  <canvas id="game" width="640" height="480" hidden></canvas>
+  <ul id="legend" hidden></ul>
+  <pre id="results"></pre>
+  <script>window.requestAnimationFrame = () => 0;</script>
+  <script src="game.js"></script>
+  <script>
+    const results = document.getElementById('results');
+    let failures = 0;
+    let passed = 0;
+
+    function assert(condition, message) {
+      if (!condition) throw new Error(message);
+    }
+
+    let ball; // the main ball for the current test
+    function test(name, run) {
+      try {
+        newGame();
+        ball = balls[0];
+        pickups = [];
+        run();
+        results.textContent += `PASS ${name}\n`;
+        passed++;
+      } catch (error) {
+        results.textContent += `FAIL ${name}: ${error.stack}\n`;
+        failures++;
+      }
+    }
+
+    test('L and T outlines rotate without filling their notches', () => {
+      const examples = [
+        { shape: BLOCK_SHAPES[0], width: 2, height: 3, solid: [0.5, 1.5], empty: [1.5, 0.5] },
+        { shape: BLOCK_SHAPES[1], width: 3, height: 2, solid: [1.5, 1.5], empty: [0.5, 1.5] },
+      ];
+      for (const example of examples) {
+        for (let turns = 0; turns < 4; turns++) {
+          const b = createBlock(example.shape, turns, 100, 60, 30, 3);
+          const expected = ([x, y]) => [
+            [x, y], [example.height - y, x],
+            [example.width - x, example.height - y], [y, example.width - x],
+          ][turns];
+          const [sx, sy] = expected(example.solid);
+          const [ex, ey] = expected(example.empty);
+          assert(ctx.isPointInPath(b.path, 100 + sx * 30, 60 + sy * 30), `Missing arm at rotation ${turns}`);
+          assert(!ctx.isPointInPath(b.path, 100 + ex * 30, 60 + ey * 30), `Filled notch at rotation ${turns}`);
+          assert(ctx.isPointInPath(b.path, b.label.x, b.label.y), 'Hit count lies outside the shape');
+        }
+      }
+    });
+
+    test('Notches and rounded-off corners are not solid bounding boxes', () => {
+      const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3);
+      ball.x = 145;
+      ball.y = 75;
+      assert(blockContact(b, BALL_R, ball) === null, 'Empty L notch blocked the ball');
+      ball.x = 100;
+      ball.y = 60;
+      assert(blockContact(b, 2, ball) === null, 'Rounded-off corner blocked the ball');
+    });
+
+    test('Curved impacts reflect correctly and count once per contact', () => {
+      const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3);
+      blocks = [b];
+      const corner = b.corners[0];
+      const offset = (corner.radius + BALL_R - 0.25) / Math.SQRT2;
+      Object.assign(ball, {
+        x: corner.center.x - offset, y: corner.center.y - offset,
+        vx: BALL_SPEED / Math.SQRT2, vy: BALL_SPEED / Math.SQRT2,
+      });
+      moveBall(ball, 0);
+      assert(b.hits === 2, 'Curved impact did not remove exactly one hit');
+      assert(ball.vx < 0 && ball.vy < 0, 'Ball did not reflect off the curved surface');
+      assert(Math.abs(Math.hypot(ball.vx, ball.vy) - BALL_SPEED) < 0.001, 'Bounce changed speed');
+      moveBall(ball, 0);
+      assert(b.hits === 2, 'Persistent contact damaged the block again');
+
+      const inner = b.corners[2];
+      const innerOffset = (inner.radius - BALL_R + 0.25) / Math.SQRT2;
+      Object.assign(ball, {
+        x: inner.center.x - innerOffset, y: inner.center.y + innerOffset,
+        vx: -BALL_SPEED / Math.SQRT2, vy: BALL_SPEED / Math.SQRT2,
+      });
+      moveBall(ball, 0);
+      assert(b.hits === 1, 'Inside corner did not count one impact');
+      assert(ball.vx > 0 && ball.vy < 0, 'Inside-corner reflection points into the block');
+    });
+
+    test('Damage crosses colour bands and rewards destruction only once', () => {
+      const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 51);
+      damageBlock(b);
+      assert(b.hits === 50 && lives === 3 && score === 0, 'Surviving block was destroyed or rewarded');
+      for (const max of [5, 10, 15, 20, 25]) {
+        assert(blockColor(max) !== blockColor(max + 1), `Colour did not change after ${max}`);
+      }
+      assert(blockColor(1) === blockColor(5), 'First health band is inconsistent');
+      assert(blockColor(31) === blockColor(1), 'Colours do not cycle after the last band');
+      damageBlock(b, 100);
+      assert(b.hits === 0 && lives === 3 && score === 10 && active === null, 'Destruction awarded a hidden powerup');
+      damageBlock(b);
+      assert(b.hits === 0 && lives === 3 && score === 10, 'Destroyed block rewarded twice');
+    });
+
+    test('Double strength removes two hits per impact and still bounces', () => {
+      const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 20, 5);
+      blocks = [b];
+      setPowerup('double');
+      Object.assign(ball, { x: 94, y: 80, vx: ballSpeed(), vy: 0 });
+      moveBall(ball, 0);
+      assert(b.hits === 3 && ball.vx < 0, 'Double strength did not deal two damage and bounce');
+      assert(!('fire' in POWERUPS) && !('bomb' in POWERUPS), 'Old fireball or bomb powerups remain');
+    });
+
+    test('Multi-ball splits off at an angle and lives are lost only when every ball is gone', () => {
+      blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
+      pickups = [{ x: 300, y: 300, type: 'multi' }];
+      Object.assign(ball, { x: 300, y: 310, vx: 0, vy: -ballSpeed() });
+      launched = true;
+      moveBall(ball, 0);
+      assert(balls.length === 2 && pickups.length === 0, 'Multi-ball did not add a second ball');
+      const extra = balls[1];
+      assert(Math.abs(Math.hypot(extra.vx, extra.vy) - ballSpeed()) < 0.001, 'New ball has the wrong speed');
+      assert(extra.vx !== 0 && extra.vy < 0, 'New ball did not split off at an upward angle');
+
+      ball.y = H + BALL_R * 3;
+      update(0);
+      assert(balls.length === 1 && balls[0] === extra && lives === 3 && launched, 'Losing one of two balls cost a life');
+      extra.y = H + BALL_R * 3;
+      extra.vy = BALL_SPEED;
+      update(0);
+      assert(lives === 2 && balls.length === 1 && !launched, 'Losing the last ball did not cost a life');
+    });
+
+    test('Fast and giant balls use the shape outline without tunnelling', () => {
+      const b = createBlock(BLOCK_SHAPES[3], 0, 100, 100, 30, 3);
+      blocks = [b];
+      Object.assign(ball, { x: 145, y: 170, vx: 0, vy: -2000 });
+      launched = true;
+      update(0.05);
+      assert(b.hits === 2 && ball.vy > 0, 'Fast ball skipped or repeatedly hit the thin block');
+
+      const largeTarget = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3);
+      blocks = [largeTarget];
+      setPowerup('giant');
+      Object.assign(ball, { x: 87, y: 95, vx: ballSpeed(), vy: 0 });
+      moveBall(ball, 0);
+      assert(largeTarget.hits === 2 && ball.vx < 0, 'Giant ball did not collide using its larger radius');
+    });
+
+    test('Layouts interlock without overlapping solids or hiding pickups', () => {
+      const originalRandom = Math.random;
+      try {
+        for (const seed of [1, 42, 12345]) {
+          let randomState = seed;
+          Math.random = () => {
+            randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
+            return randomState / 4294967296;
+          };
+          for (const nextLevel of [1, 6, 20]) {
+            level = nextLevel;
+            buildBlocks();
+            assert(blocks.length >= (level === 1 ? 14 : 28),
+              `Layout has too few blocks (${blocks.length} at level ${level}, seed ${seed})`);
+            let interlocking = false;
+            for (const [i, b] of blocks.entries()) {
+              assert(b.hits >= 1 && b.hits <= HITS_PER_LEVEL * level, 'Health is outside the level range');
+              assert(ctx.isPointInPath(b.path, b.label.x, b.label.y), 'Generated hit count is outside its block');
+              assert(b.bounds.left >= 0 && b.bounds.right <= W &&
+                b.bounds.top >= BLOCK_TOP && b.bounds.bottom < paddle.y, 'Block is outside the play area');
+              for (const other of blocks.slice(i + 1)) {
+                const left = Math.max(b.bounds.left, other.bounds.left);
+                const right = Math.min(b.bounds.right, other.bounds.right);
+                const top = Math.max(b.bounds.top, other.bounds.top);
+                const bottom = Math.min(b.bounds.bottom, other.bounds.bottom);
+                if (left >= right || top >= bottom) continue;
+                interlocking = true;
+                for (let y = top + 0.5; y < bottom; y += 3) {
+                  for (let x = left + 0.5; x < right; x += 3) {
+                    assert(!ctx.isPointInPath(b.path, x, y) || !ctx.isPointInPath(other.path, x, y),
+                      'Interlocking shapes overlap their solid areas');
+                  }
+                }
+              }
+            }
+            assert(interlocking, 'Shapes are still isolated in separate bounding boxes');
+            assert(pickups.length === POWERUPS_PER_LEVEL, 'Missing floating pickups');
+            const ordered = [...pickups].sort((a, b) => a.x - b.x);
+            for (let i = 1; i < ordered.length; i++) {
+              assert(ordered[i].x - ordered[i - 1].x > BALL_R * 4, 'Passages merged together');
+            }
+            function hasClearPath(x, radius) {
+              ball.x = x;
+              for (let y = BLOCK_TOP - radius; y <= BLOCK_TOP + BLOCK_AREA_H + radius; y += 3) {
+                ball.y = y;
+                if (blocks.some(b => blockContact(b, radius, ball))) return false;
+              }
+              return true;
+            }
+            let clearRoutes = 0;
+            for (const pickup of pickups) {
+              for (const b of blocks) {
+                for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+                  assert(!ctx.isPointInPath(b.path, pickup.x + Math.cos(angle) * POWERUP_R,
+                    pickup.y + Math.sin(angle) * POWERUP_R), 'Pickup is inside a block');
+                }
+                for (let y = pickup.y; y < BLOCK_TOP + BLOCK_AREA_H + BALL_R; y += 3) {
+                  for (const dx of [-BALL_R, 0, BALL_R]) {
+                    assert(!ctx.isPointInPath(b.path, pickup.x + dx, y), 'Pickup has no open approach from below');
+                  }
+                }
+              }
+              if (hasClearPath(pickup.x, BALL_R * 2)) clearRoutes++;
+            }
+            assert(clearRoutes >= 2, 'Fewer than two routes fit the giant ball');
+
+            const cols = level > SHRINK_AFTER_LEVEL ? COLS * 2 : COLS;
+            const size = Math.min((W - BLOCK_GAP * 2) / cols, BLOCK_AREA_H / ROWS);
+            const left = (W - cols * size) / 2;
+            let paths = 0;
+            let previousClear = false;
+            for (let c = 0; c < cols; c++) {
+              const clear = hasClearPath(left + (c + 0.5) * size, BALL_R);
+              if (clear && !previousClear) paths++;
+              previousClear = clear;
+            }
+            assert(paths >= 2 && paths <= 3, `Expected two or three routes, got ${paths}`);
+          }
+        }
+        draw();
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    test('Pickups can spawn in every row, including the top three', () => {
+      const size = Math.min((W - BLOCK_GAP * 2) / COLS, BLOCK_AREA_H / ROWS);
+      const rows = new Set();
+      for (let i = 0; i < 60; i++) {
+        buildBlocks();
+        for (const pickup of pickups) rows.add(Math.floor((pickup.y - BLOCK_TOP) / size));
+      }
+      for (let r = 0; r < ROWS; r++) assert(rows.has(r), `No pickup spawned in row ${r}`);
+    });
+
+    test('Floating pickups activate on touch without bouncing and are collected once', () => {
+      blocks = [];
+      pickups = [{ x: 200, y: 350, type: 'heart' }];
+      Object.assign(ball, { x: 190, y: 350, vx: BALL_SPEED, vy: 0 });
+      moveBall(ball, 0.01);
+      assert(pickups.length === 0 && lives === 4 && active.type === 'heart', 'Pickup did not activate and disappear');
+      assert(Math.abs(ball.x - 193.2) < 0.001 && ball.y === 350 &&
+        ball.vx === BALL_SPEED && ball.vy === 0, 'Pickup moved or bounced the ball');
+      moveBall(ball, 0);
+      assert(lives === 4, 'Pickup was collected twice');
+
+      pickups = [{ x: 240, y: 350, type: 'ice' }];
+      moveBall(ball, 0);
+      assert(pickups.length === 1 && active.type === 'heart', 'Distant pickup activated');
+      ball.x = 224;
+      moveBall(ball, 0);
+      assert(pickups.length === 0 && active.type === 'ice', 'Edge contact did not collect the pickup');
+      assert(ball.x === 224 && ball.vx > 0 && ball.vy === 0 &&
+        Math.abs(ball.vx - BALL_SPEED * 0.6) < 0.001, 'Speed pickup changed the trajectory');
+    });
+
+    test('Fast and giant balls collect floating pickups using their actual contact', () => {
+      blocks = [createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 3)];
+      pickups = [{ x: 250, y: 350, type: 'heart' }];
+      Object.assign(ball, { x: 200, y: 350, vx: 2000, vy: 0 });
+      launched = true;
+      update(0.05);
+      assert(pickups.length === 0 && lives === 4 && ball.vx > 0 && ball.vy === 0, 'Fast ball skipped the pickup');
+
+      pickups = [{ x: 322, y: 350, type: 'heart' }];
+      setPowerup('giant');
+      Object.assign(ball, { x: 300, y: 350, vx: ballSpeed(), vy: 0 });
+      moveBall(ball, 0);
+      assert(pickups.length === 0 && lives === 5 && ball.vx > 0, 'Giant pickup contact ignored the larger radius');
+    });
+
+    test('Life loss preserves damage and pickups; clearing a level regenerates both', () => {
+      const b = createBlock(BLOCK_SHAPES[0], 0, 100, 60, 30, 2);
+      blocks = [b];
+      const pickup = { x: 100, y: 350, type: 'heart' };
+      pickups = [pickup];
+      Object.assign(ball, { x: 40, y: H + BALL_R + 1, vx: 0, vy: BALL_SPEED });
+      launched = true;
+      update(0);
+      assert(lives === 2 && b.hits === 2 && !launched, 'Life loss reset the level or failed to reset the ball');
+      assert(pickups.length === 1 && pickups[0] === pickup, 'Life loss replaced the remaining pickups');
+      damageBlock(b, 2);
+      launched = true;
+      update(0);
+      assert(level === 2 && !launched && blocks.every(block => block.hits > 0), 'Cleared level did not advance');
+      assert(pickups.length === POWERUPS_PER_LEVEL && !pickups.includes(pickup), 'Cleared level kept the old pickups');
+    });
+
+    results.textContent += `\n${passed} passed, ${failures} failed`;
+    document.body.dataset.failures = failures;
+    document.title = `${failures ? 'FAIL' : 'PASS'}: Block Breaker tests`;
+  </script>
+</body>
+</html>
